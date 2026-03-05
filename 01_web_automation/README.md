@@ -1,6 +1,6 @@
 ### **🏗️ 시스템 아키텍처 및 자동화 프로세스**
 
-본 프로젝트는 단순한 매크로를 넘어 **데이터 보안(Security)**, **예외 처리(Error Handling)**, **작업 연속성(State Persistence)**을 최우선으로 설계되었습니다.
+본 프로젝트는 단순한 매크로를 넘어 **데이터 보안(Security)**, **예외 처리(Error Handling)**, **작업 연속성(State Persistence)** 을 최우선으로 설계되었습니다.
 
 #### **1. 전략적 사이트 구조 대응 (Dynamic Navigation)**
 
