@@ -269,3 +269,24 @@ conn.close()
 전체 작업 수 = 8 유형 × 68 지역 × ~110 연월 ≈ **약 59,840 작업**
 
 일일 한도 10,000회 기준으로 약 **6~7일** 소요됩니다. (네트워크 및 API 응답 속도에 따라 달라질 수 있습니다.)
+
+---
+
+## crontab 등록을 위해 .bat 추가
+
+해당 파일로 이동 -> 가상환경 사용
+
+### Powershell 한 번에 등록
+
+매일 오전 9시에 작업 시작
+
+```powershell
+$action = New-ScheduledTaskAction `
+  -Execute "C:\Users\Desktop\08_molit_trade_collector\.venv\Scripts\python.exe" `
+  -Argument "bulk_collector.py" `
+  -WorkingDirectory "C:\Users\Desktop\08_molit_trade_collector"
+
+$trigger = New-ScheduledTaskTrigger -Daily -At "09:00"
+
+Register-ScheduledTask -TaskName "molit_collector" -Action $action -Trigger $trigger
+```
