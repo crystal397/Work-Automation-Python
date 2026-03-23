@@ -1,6 +1,6 @@
 # 국토교통부 실거래가 전수 수집기
 
-국토교통부 실거래가 공공 API를 활용하여 **서울 25구 + 경기 43 시군구**의 부동산 거래 데이터를 자동으로 수집하는 Python 스크립트입니다.
+국토교통부 실거래가 공공 API를 활용하여 **서울 25구 + 경기 43 시군구**의 부동산 거래 데이터를 자동으로 수집하고, Excel 보고서로 추출하는 Python 스크립트입니다.
 
 ---
 
@@ -38,7 +38,7 @@
 - 국토교통부 실거래가 API 키 ([공공데이터포털](https://www.data.go.kr) 에서 발급)
 
 ```bash
-pip install requests
+pip install requests openpyxl
 ```
 
 ---
@@ -47,7 +47,8 @@ pip install requests
 
 ### 방법 1 — `.env` 파일 사용 (권장)
 
-프로젝트 루트에 `.env` 파일을 만들고 아래 내용을 추가합니다.
+프로젝트 루트 또는 **상위 폴더**에 `.env` 파일을 만들고 아래 내용을 추가합니다.  
+(스크립트는 현재 폴더 → 상위 폴더 순으로 `.env`를 탐색합니다.)
 
 ```
 MOLIT_SERVICE_KEY=발급받은_API_키
@@ -65,6 +66,8 @@ MOLIT_SERVICE_KEY = "여기에_API_키_입력"
 
 ## 사용법
 
+### 수집 (`bulk_collector.py`)
+
 ```bash
 # 수집 실행 (중단 후 재실행하면 이어서 수집)
 python bulk_collector.py
@@ -73,19 +76,52 @@ python bulk_collector.py
 python bulk_collector.py --status
 ```
 
-### 현황 출력 예시
+### 보고서 추출 (`export_report.py`)
+
+```bash
+# 기본 (전체 지역, 최근 12개월)
+python export_report.py
+
+# 특정 지역
+python export_report.py --region 강남구 서초구
+
+# 특정 거래유형
+python export_report.py --type apt_trade
+
+# 최근 24개월
+python export_report.py --months 24
+
+# 거래금액 범위 필터 (만원, 매매만 적용)
+python export_report.py --min-price 50000 --max-price 200000
+
+# 출력 파일명 지정
+python export_report.py --output my_report.xlsx
+```
+
+---
+
+## 현황 출력 예시 (`--status`)
 
 ```
 =======================================================
-  진행률     :    1200 / 98464 (1.2%)
-  남은 작업  :   97264 건
-  예상 잔여  : 약 11일 (일일 9000회 기준)
+  진행률     :    1200 / 59840 (2.0%)
+  남은 작업  :   58640 건
+  예상 잔여  : 약 6일 (일일 10000회 기준)
   누적 호출  :    1210 회
   누적 레코드:  350000 건
   오늘 날짜  : 2025-06-01
-  오늘 호출  : 1210 / 9000 회
+  오늘 호출  : 1210 / 10000 회
 =======================================================
 ```
+
+### 수집 중 실시간 로그 예시
+
+```
+[오늘  42.3% | 전체   1.8%]  소진 423/1000회  경과 3분 31초  잔여예상 4시간 22분 18초
+```
+
+- **오늘 %** : 오늘 가용 한도(잔여 호출 수) 대비 이번 세션 소진 비율
+- **전체 %** : 전체 수집 작업 누적 완료 비율
 
 ---
 
@@ -95,7 +131,7 @@ python bulk_collector.py --status
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `DAILY_LIMIT` | `9000` | 하루 최대 API 호출 수 (유형별 각각) |
+| `DAILY_LIMIT` | `10000` | 하루 최대 API 호출 수 (100% 사용) |
 | `CALL_DELAY` | `0.5` | API 호출 간격 (초) |
 | `ROWS_PER_PAGE` | `1000` | 페이지당 최대 행 수 |
 | `YEARS_BACK` | `10` | 수집 기간 (년) |
@@ -107,12 +143,16 @@ python bulk_collector.py --status
 ```
 project/
 ├── bulk_collector.py   # 메인 수집 스크립트
+├── export_report.py    # Excel 보고서 추출 스크립트
 ├── .env                # API 키 설정 (직접 생성)
 ├── bulk_data.db        # 수집된 데이터 (SQLite, 자동 생성)
 └── logs/
-    ├── progress.json               # 수집 진행 상황 (자동 생성)
-    └── bulk_collector_YYYYMMDD.log # 일별 로그 (자동 생성)
+    ├── progress.json                   # 수집 진행 상황 (자동 생성)
+    ├── bulk_collector_YYYYMMDD.log     # 일별 수집 로그 (자동 생성)
+    └── zero_records.log                # 0건 수집 항목 전용 로그 (자동 생성)
 ```
+
+> `.env`는 현재 폴더에 없으면 상위 폴더에서도 자동으로 탐색합니다.
 
 ---
 
@@ -153,10 +193,27 @@ conn.close()
 
 ---
 
+## 로그 파일 안내
+
+| 파일 | 설명 |
+|------|------|
+| `logs/bulk_collector_YYYYMMDD.log` | 전체 수집 로그 (진행률·소요시간 포함) |
+| `logs/zero_records.log` | 0건 수집된 항목만 별도 기록 — 코드 오류·API 이상 점검용 |
+
+`zero_records.log` 형식 예시:
+```
+2026-03-23 09:15:02    offi_trade    오피스텔 매매    41800    경기 연천군    202301
+```
+0건이 많이 쌓인 경우, 해당 지역·유형·연월 조합의 API 응답을 직접 확인해보세요.
+
+---
+
 ## 동작 방식
 
 ```
 실행
+ │
+ ├─ .env 로드 (현재 폴더 → 상위 폴더 순 탐색)
  │
  ├─ progress.json 로드 → 완료된 작업 목록 확인
  │
@@ -169,9 +226,13 @@ conn.close()
  │    │
  │    ├─ SQLite에 저장
  │    │
+ │    ├─ 0건이면 zero_records.log에 기록
+ │    │
+ │    ├─ 진행률 로그 출력 (오늘 % / 전체 % / 경과 시간 / 잔여 예상)
+ │    │
  │    └─ progress.json 업데이트 (atomic replace)
  │
- └─ 일일 한도 도달 or 완료 → 종료
+ └─ 일일 한도 도달 or 완료 → 종료 (소요 시간 출력)
 ```
 
 - **이어하기**: 수집 도중 중단되어도 `progress.json`을 기반으로 완료된 작업을 건너뛰고 재개합니다.
@@ -184,25 +245,4 @@ conn.close()
 
 전체 작업 수 = 8 유형 × 68 지역 × ~110 연월 ≈ **약 59,840 작업**
 
-일일 한도 9,000회 기준으로 약 **7~8일** 소요됩니다. (네트워크 및 API 응답 속도에 따라 달라질 수 있습니다.)
-
----
-
-## 주의사항
-
-- API 키는 `.env` 파일에 보관하고, `.gitignore`에 추가하여 저장소에 올라가지 않도록 주의하세요.
-- 공공데이터포털의 일일 호출 제한 정책을 준수하여 `DAILY_LIMIT` 값을 설정하세요.
-- `bulk_data.db`는 수집이 완료되면 수 GB에 달할 수 있습니다.
-
-```gitignore
-# .gitignore 권장 항목
-.env
-bulk_data.db
-logs/
-```
-
----
-
-## 라이선스
-
-MIT License
+일일 한도 10,000회 기준으로 약 **6~7일** 소요됩니다. (네트워크 및 API 응답 속도에 따라 달라질 수 있습니다.)
