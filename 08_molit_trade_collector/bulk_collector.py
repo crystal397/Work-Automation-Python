@@ -30,8 +30,14 @@ from pathlib import Path
 # =============================================================
 def _load_env() -> dict:
     env: dict = {}
-    p = Path(__file__).parent / ".env"
-    if not p.exists():
+    parent = Path(__file__).parent
+    p = None
+    for folder in [parent, parent.parent]:
+        candidate = folder / ".env"
+        if candidate.exists():
+            p = candidate
+            break
+    if p is None:
         return env
     with open(p, encoding="utf-8-sig") as f:
         for line in f:
@@ -56,7 +62,7 @@ MOLIT_SERVICE_KEY = _ENV.get("MOLIT_SERVICE_KEY", "")
 #  .env 없이 직접 입력하려면 아래 줄 사용:
 #  MOLIT_SERVICE_KEY = "여기에_API_키_입력"
 
-DAILY_LIMIT   = 9000   # 하루 최대 API 호출 수 (유형별 각각)
+DAILY_LIMIT   = 10000  # 하루 최대 API 호출 수 (100% 사용)
 CALL_DELAY    = 0.5    # 호출 간격(초)
 ROWS_PER_PAGE = 1000   # 페이지당 최대 행 수
 YEARS_BACK    = 10     # 수집 기간(년)
@@ -64,7 +70,8 @@ YEARS_BACK    = 10     # 수집 기간(년)
 BASE_DIR      = Path(__file__).parent
 DB_PATH       = BASE_DIR / "bulk_data.db"
 LOG_DIR       = BASE_DIR / "logs"
-PROGRESS_PATH = LOG_DIR  / "progress.json"   # logs/ 안에 저장 (VSCode 잠금 회피)
+PROGRESS_PATH = LOG_DIR  / "progress.json"
+ZERO_LOG_PATH = LOG_DIR  / "zero_records.log"  # 0건 수집 전용 로그
 
 # =============================================================
 #  API 엔드포인트 (공공데이터포털 apis.data.go.kr)
@@ -135,6 +142,19 @@ class DailyLimitReached(Exception):
     pass
 
 # =============================================================
+#  시간 포맷 헬퍼
+# =============================================================
+def fmt_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    h, r = divmod(seconds, 3600)
+    m, s = divmod(r, 60)
+    if h:
+        return f"{h}시간 {m}분 {s}초"
+    if m:
+        return f"{m}분 {s}초"
+    return f"{s}초"
+
+# =============================================================
 #  로깅
 # =============================================================
 def setup_logging():
@@ -152,11 +172,17 @@ def setup_logging():
     )
     return logging.getLogger("bulk_collector")
 
+def log_zero_record(api_type, api_name, region_code, region_name, year_month):
+    """0건 수집 항목을 전용 로그 파일에 기록 (정상 여부 점검용)"""
+    LOG_DIR.mkdir(exist_ok=True)
+    with open(ZERO_LOG_PATH, "a", encoding="utf-8") as f:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"{ts}\t{api_type}\t{api_name}\t{region_code}\t{region_name}\t{year_month}\n")
+
 # =============================================================
 #  진행 상황 관리
 # =============================================================
 def load_progress():
-    # 구 위치(루트)에 파일이 있으면 logs/ 로 이전
     old_path = BASE_DIR / "progress.json"
     if old_path.exists() and not PROGRESS_PATH.exists():
         LOG_DIR.mkdir(exist_ok=True)
@@ -186,17 +212,16 @@ def load_progress():
     }
 
 def save_progress(progress):
-    # 임시 파일에 쓴 뒤 교체 (Windows 파일 잠금 회피)
     tmp = PROGRESS_PATH.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(progress, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, PROGRESS_PATH)  # atomic replace
+    os.replace(tmp, PROGRESS_PATH)
 
 def reset_daily_if_new_day(progress):
     today_str = date.today().strftime("%Y-%m-%d")
     if progress["today_date"] != today_str:
-        progress["today_date"]       = today_str
-        progress["today_calls"]      = 0
+        progress["today_date"]          = today_str
+        progress["today_calls"]         = 0
         progress["today_calls_by_type"] = {}
 
 # =============================================================
@@ -352,20 +377,28 @@ def run():
     progress = load_progress()
     reset_daily_if_new_day(progress)
 
-    year_months   = generate_year_months(YEARS_BACK)
-    total_tasks   = len(API_TYPES) * len(REGIONS) * len(year_months)
+    year_months  = generate_year_months(YEARS_BACK)
+    total_tasks  = len(API_TYPES) * len(REGIONS) * len(year_months)
     completed_set = set(progress["completed"])
+
+    # 오늘 이미 소진된 호출 수 기준으로 잔여 한도 계산
+    today_calls_at_start = progress["today_calls"]
+    today_budget         = DAILY_LIMIT - today_calls_at_start
+
+    session_start  = time.time()
+    session_tasks  = 0
+    session_calls  = 0
+    records_before = progress["total_records"]
 
     log.info("=" * 60)
     log.info("국토교통부 실거래가 전수 수집 시작")
     log.info("전체 작업: %d건 | 완료: %d건 | 남음: %d건",
              total_tasks, len(completed_set), total_tasks - len(completed_set))
-    log.info("오늘 호출: %d회 / %d회", progress["today_calls"], DAILY_LIMIT)
+    log.info("오늘 호출: %d회 소진 / 한도 %d회 | 잔여 %d회",
+             today_calls_at_start, DAILY_LIMIT, today_budget)
     log.info("=" * 60)
 
     conn = init_db()
-    session_tasks  = 0
-    records_before = progress["total_records"]
 
     try:
         for api_type, (api_name, api_url) in API_TYPES.items():
@@ -375,18 +408,46 @@ def run():
                     if key in completed_set:
                         continue
 
-                    by_type = progress["today_calls_by_type"]
-                    log.info("[%s] %s %s-%s  (오늘 %d/%d회)",
-                             api_name, region_name, ym[:4], ym[4:],
-                             by_type.get(api_type, 0), DAILY_LIMIT)
+                    calls_before = progress["today_calls"]
 
                     saved = collect_one(
                         conn, api_type, api_url,
                         region_code, ym, progress, log,
                     )
-                    log.info("  └ %d건 저장", saved)
 
+                    calls_used    = progress["today_calls"] - calls_before
+                    session_calls += calls_used
+
+                    # 0건이면 전용 로그에만 기록 (정상 수집은 print 안 함)
+                    if saved == 0:
+                        log_zero_record(api_type, api_name, region_code, region_name, ym)
+
+                    # 진행률 계산
                     completed_set.add(key)
+                    done_total = len(completed_set)
+                    total_pct  = done_total / total_tasks * 100
+
+                    # 오늘 가용 한도 대비 소진 %
+                    today_pct = (
+                        session_calls / today_budget * 100
+                        if today_budget > 0 else 100.0
+                    )
+
+                    # 예상 잔여 시간 (이번 세션 속도 기준)
+                    elapsed    = time.time() - session_start
+                    speed      = (session_tasks + 1) / elapsed if elapsed > 0 else 0
+                    remaining  = total_tasks - done_total
+                    eta_sec    = remaining / speed if speed > 0 else 0
+
+                    log.info(
+                        "[오늘 %5.1f%% | 전체 %5.1f%%]  "
+                        "소진 %d/%d회  경과 %s  잔여예상 %s",
+                        today_pct, total_pct,
+                        session_calls, today_budget,
+                        fmt_duration(elapsed),
+                        fmt_duration(eta_sec),
+                    )
+
                     progress["completed"] = list(completed_set)
                     save_progress(progress)
                     session_tasks += 1
@@ -404,6 +465,7 @@ def run():
         conn.close()
         save_progress(progress)
 
+        elapsed         = time.time() - session_start
         done            = len(completed_set)
         pct             = done / total_tasks * 100
         session_records = progress["total_records"] - records_before
@@ -411,10 +473,12 @@ def run():
         est_days        = (remaining // DAILY_LIMIT + 1) if remaining > 0 else 0
 
         log.info("-" * 60)
-        log.info("이번 세션: %d개 작업, %d건 저장", session_tasks, session_records)
-        log.info("누적 진행: %d / %d (%.1f%%)", done, total_tasks, pct)
+        log.info("세션 소요 시간 : %s", fmt_duration(elapsed))
+        log.info("이번 세션      : 작업 %d건 | 저장 %d건 | 호출 %d회",
+                 session_tasks, session_records, session_calls)
+        log.info("누적 진행      : %d / %d (%.1f%%)", done, total_tasks, pct)
         if remaining > 0:
-            log.info("예상 잔여: 약 %d일 (일일 %d회 기준)", est_days, DAILY_LIMIT)
+            log.info("예상 잔여      : 약 %d일 (일일 %d회 기준)", est_days, DAILY_LIMIT)
         log.info("=" * 60)
 
 # =============================================================

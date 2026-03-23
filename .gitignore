@@ -1,3 +1,9 @@
+# file
+남부내륙1공구_산근.xlsx
+
+*.db
+logs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
