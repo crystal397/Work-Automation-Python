@@ -383,7 +383,7 @@ def run():
 
     # 오늘 이미 소진된 호출 수 기준으로 잔여 한도 계산
     today_calls_at_start = progress["today_calls"]
-    today_budget         = DAILY_LIMIT - today_calls_at_start
+    today_budget         = DAILY_LIMIT * len(API_TYPES) - today_calls_at_start
 
     session_start  = time.time()
     session_tasks  = 0
@@ -394,8 +394,9 @@ def run():
     log.info("국토교통부 실거래가 전수 수집 시작")
     log.info("전체 작업: %d건 | 완료: %d건 | 남음: %d건",
              total_tasks, len(completed_set), total_tasks - len(completed_set))
-    log.info("오늘 호출: %d회 소진 / 한도 %d회 | 잔여 %d회",
-             today_calls_at_start, DAILY_LIMIT, today_budget)
+    log.info("오늘 호출: %d회 소진 / 한도 %d회(유형별 %d × %d종) | 잔여 %d회",
+             today_calls_at_start, DAILY_LIMIT * len(API_TYPES),
+             DAILY_LIMIT, len(API_TYPES), today_budget)
     log.info("=" * 60)
 
     conn = init_db()
@@ -439,26 +440,31 @@ def run():
                     remaining  = total_tasks - done_total
                     eta_sec    = remaining / speed if speed > 0 else 0
 
-                    log.info(
-                        "[오늘 %5.1f%% | 전체 %5.1f%%]  "
-                        "소진 %d/%d회  경과 %s  잔여예상 %s",
-                        today_pct, total_pct,
-                        session_calls, today_budget,
-                        fmt_duration(elapsed),
-                        fmt_duration(eta_sec),
+                    # 콘솔: \r 덮어쓰기 (같은 줄 갱신)
+                    status_line = (
+                        f"[오늘 {today_pct:5.1f}% | 전체 {total_pct:5.1f}%]  "
+                        f"소진 {session_calls}/{today_budget}회  "
+                        f"경과 {fmt_duration(elapsed)}  "
+                        f"잔여예상 {fmt_duration(eta_sec)}"
                     )
+                    print(f"\r{status_line:<100}", end="", flush=True)
+
+
 
                     progress["completed"] = list(completed_set)
                     save_progress(progress)
                     session_tasks += 1
 
+        print()
         log.info("★ 모든 수집 완료!")
 
     except DailyLimitReached:
+        print()
         log.info("일일 호출 한도 %d회 도달 → 오늘 수집 종료", DAILY_LIMIT)
         log.info("내일 다시 실행하면 이어서 수집합니다.")
 
     except KeyboardInterrupt:
+        print()
         log.info("사용자 중단 (Ctrl+C)")
 
     finally:
