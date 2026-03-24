@@ -1,6 +1,6 @@
 # 10_weather_collector
 
-기상청 ASOS(종관기상관측) API를 활용한 건설현장 기상데이터 Bulk 수집 시스템
+기상청 ASOS(종관기상관측) API를 활용한 건설현장 기상데이터 Bulk 수집 및 작업불가일 산정 시스템
 
 ---
 
@@ -22,12 +22,13 @@
 ├── .env                        ← API 키
 └── 10_weather_collector/
     ├── README.md
-    ├── config.py               ← 설정, API 키, 현장 목록
+    ├── config.py               ← 설정, API 키, 현장 목록 (공종별 작업 기간 포함)
     ├── station_mapper.py       ← 현장 좌표 → 기상관측소 매핑 (727개소)
     ├── kma_client.py           ← 기상청 API 호출 + 파싱
     ├── storage.py              ← DB 저장 (SQLite)
     ├── collector.py            ← 수집 오케스트레이터
-    └── scheduler.py            ← 매일 자동 실행 (APScheduler)
+    ├── scheduler.py            ← 매일 자동 실행 (APScheduler)
+    └── analyzer.py             ← 공종별 작업불가일 산정 + 엑셀 출력
 ```
 
 ---
@@ -44,7 +45,7 @@
 ### 2. 패키지 설치
 
 ```bash
-pip install requests pandas sqlalchemy apscheduler python-dotenv
+pip install requests pandas sqlalchemy apscheduler python-dotenv openpyxl
 ```
 
 ### 3. .env 파일 작성
@@ -62,35 +63,47 @@ KMA_API_KEY=발급받은키를여기에입력
 ### config.py
 
 API 키, DB 경로, 수집 대상 현장 목록을 관리합니다.
+각 현장에 **공종별 작업 기간(`works`)** 을 정의하면 `analyzer.py`에서 작업불가일을 자동으로 산정합니다.
 
 ```python
-import os
-from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
-
-KMA_API_KEY = os.getenv("KMA_API_KEY")
-
-BASE_DIR = Path(__file__).parent
-DB_PATH  = BASE_DIR / "weather.db"
-
 SITES = [
     {
-        "id": "SITE001",
-        "name": "서울 강남 현장",
-        "lat": 37.5172,
-        "lon": 127.0473,
+        "id":    "SITE001",
+        "name":  "수원 장안구 파장동~송죽동 현장",
+        "lat":   37.2723,
+        "lon":   126.9853,
         "start": "2024-01-01",
-        "end": "2025-06-30"
-    },
-    {
-        "id": "SITE002",
-        "name": "부산 해운대 현장",
-        "lat": 35.1631,
-        "lon": 129.1639,
-        "start": "2024-03-01",
-        "end": "2025-12-31"
+        "end":   "2025-12-31",
+
+        # 공종별 작업 기간 정의
+        "works": [
+            {
+                "name":  "토공사",
+                "start": "2024-01-01",
+                "end":   "2024-03-31",
+                "flags": ["is_rain_day", "is_snow_day", "is_freeze_day", "is_cold_day"]
+            },
+            {
+                "name":  "철근콘크리트공사",
+                "start": "2024-04-01",
+                "end":   "2024-09-30",
+                "flags": ["is_rain_day", "is_heat_day", "is_cold_day",
+                          "is_freeze_day", "is_wind_day"]
+            },
+            {
+                "name":  "타워크레인작업",
+                "start": "2024-04-01",
+                "end":   "2024-12-31",
+                "flags": ["is_wind_crane", "is_wind_day", "fog_yn"]
+            },
+            {
+                "name":  "도장·방수공사",
+                "start": "2025-01-01",
+                "end":   "2025-06-30",
+                "flags": ["is_rain_day", "rain_yn", "is_no_sunshine",
+                          "is_cold_day", "is_freeze_day"]
+            },
+        ]
     },
 ]
 ```
@@ -142,8 +155,9 @@ station = find_nearest_station(37.5172, 127.0473)
 | `is_no_sunshine` | 일조시간 2시간 미만 여부 |
 | `is_freeze_day` | 지면온도 0℃ 이하 여부 (지면 동결) |
 | `is_high_evap_day` | 증발량 10mm 이상 여부 (증발 과다) |
-| `rain_yn` | 강수 유무 (소량 포함) |
-| `fog_yn` | 안개 유무 |
+| `rain_yn` | 강수 유무 (iscs 기반, 소량 포함) |
+| `snow_yn` | 강설 유무 (iscs 기반, 눈·진눈깨비 포함) |
+| `fog_yn` | 안개 유무 (지속시간 또는 iscs 기반) |
 
 API 호출 제한(초당 1회)을 준수하며, 365일 단위로 청크 분할 요청합니다.
 
@@ -187,6 +201,7 @@ CREATE TABLE weather_daily (
     is_freeze_day    BOOLEAN,
     is_high_evap_day BOOLEAN,
     rain_yn          BOOLEAN,
+    snow_yn          BOOLEAN,
     fog_yn           BOOLEAN,
     UNIQUE(site_id, date)
 )
@@ -220,6 +235,29 @@ python scheduler.py
 
 ---
 
+### analyzer.py
+
+DB에 저장된 기상 데이터를 바탕으로 **공종별 작업불가일을 산정**하고 엑셀 파일로 출력합니다.
+
+- `config.py`의 `works` 정의를 읽어 공종별 기간·플래그 적용
+- 동일 날짜에 여러 사유가 겹쳐도 작업불가일은 1일로 산정
+- 출력 파일: `{site_id}_작업불가일.xlsx`
+
+엑셀 구성:
+
+| 시트 | 내용 |
+|---|---|
+| 요약 | 현장명, 공종별 총 일수 / 작업가능일 / 작업불가일, 사유별 집계 |
+| 공종명 (개별 시트) | 일별 기상 관측값 + 플래그(O/X) + 작업불가일 여부 |
+
+직접 실행 시:
+
+```bash
+python analyzer.py
+```
+
+---
+
 ## 실행 방법
 
 ### 최초 실행 (과거 데이터 bulk 수집)
@@ -229,6 +267,14 @@ python collector.py
 ```
 
 `config.py`의 `SITES`에 설정된 `start` ~ `end` 기간 전체를 수집합니다.
+
+### 작업불가일 산정 및 엑셀 출력
+
+```bash
+python analyzer.py
+```
+
+현장별 `{site_id}_작업불가일.xlsx` 파일이 생성됩니다.
 
 ### 일배치 실행 (매일 자동 갱신)
 
@@ -253,6 +299,7 @@ nohup python scheduler.py &
 | 강풍 | 최대풍속 14m/s 이상 | `is_wind_day` | |
 | 크레인 제한 | 순간최대풍속 10m/s 이상 | `is_wind_crane` | 타워크레인 작업 기준 |
 | 적설 | 최대적설 1cm 이상 | `is_snow_day` | |
+| 강설 유무 | 눈·진눈깨비 발생 | `snow_yn` | iscs 기반 |
 | 폭염 | 최고기온 35℃ 이상 | `is_heat_day` | |
 | 한파 | 최저기온 -10℃ 이하 | `is_cold_day` | |
 | 일조 부족 | 일조시간 2시간 미만 | `is_no_sunshine` | 도장·방수·양생 작업 기준 |
