@@ -215,21 +215,23 @@ python pdf_invoice_extractor_and_excel_filler.py
 
 ### 10. 기상청 ASOS 기상 데이터 수집
 
-건설현장 좌표 기반으로 가장 가까운 ASOS 기상관측소를 자동 탐색하여 기상 데이터 수집.
+건설현장 좌표 기반으로 가장 가까운 ASOS 기상관측소를 자동 탐색하여 기상 데이터 수집 및 공종별 작업불가일 산정.
 
 - 전국 727개 ASOS 관측소 중 Haversine 거리 최근접 탐색
-- 수집 항목: 기온(최고/최저), 강수량, 풍속(평균/최대), 신적설, 습도
-- 공사중지 플래그 자동 계산 (강수 10mm+ / 풍속 14m/s+ / 적설 1cm+ / 폭염 35°C+ / 혹한 -10°C-)
-- `config.py`의 `SITES`에 현장별 위도·경도·수집기간(`start`/`end`) 설정
+- 수집 항목: 기온(최고/최저), 강수량, 풍속(평균/최대), 순간최대풍속, 신적설, 습도, 일조시간, 지면온도, 증발량
+- 공사중지 플래그 자동 계산 (강수 10mm+ / 풍속 14m/s+ / 크레인 10m/s+ / 적설 1cm+ / 폭염 35°C+ / 혹한 -10°C- / 지면동결 / 안개 등 12종)
+- `config.py`의 `SITES`에 현장별 위도·경도·수집기간 및 공종별 작업 기간(`works`) 설정
+- `analyzer.py`로 공종별 작업불가일 산정 → 현장별 엑셀 출력 (`{site_id}_작업불가일.xlsx`)
 - APScheduler로 매일 오전 6시 자동 수집
-- SQLite / PostgreSQL 선택 지원
+- SQLite 저장
 
 ```bash
 python collector.py    # 전체 기간 수집 (config.py의 SITES.start ~ end 기준)
+python analyzer.py     # 공종별 작업불가일 산정 및 엑셀 출력
 python scheduler.py    # 매일 6시 자동 수집 데몬 실행
 ```
 
-**의존성**: requests, sqlalchemy, apscheduler, pandas
+**의존성**: requests, sqlalchemy, apscheduler, pandas, openpyxl
 **API**: 기상청 ASOS
 
 ---
@@ -241,7 +243,7 @@ python scheduler.py    # 매일 6시 자동 수집 데몬 실행
 | 02 GIS | 주소 20,000건+ 병렬 지오코딩 | ThreadPoolExecutor, Kakao API |
 | 07 LH 매칭 | 195,238건 임대주택 매칭 | 4단계 신뢰도, SQLite 캐시 |
 | 08 실거래가 | 68지역 × 4유형 × 10년 | 일일 한도 관리, 재개 기능 |
-| 10 기상 | 727개 관측소 자동 탐색 | Haversine, APScheduler |
+| 10 기상 | 727개 관측소 자동 탐색 + 공종별 작업불가일 산정 | Haversine, APScheduler |
 
 ### 공통 설계 패턴
 

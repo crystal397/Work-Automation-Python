@@ -115,7 +115,7 @@ pip install openpyxl python-docx python-pptx PyMuPDF py7zr rarfile xlrd
 
 ## exe 빌드 방법
 
-`build_exe.ps1`을 `check_files.py`와 같은 폴더에 놓고 실행합니다.
+`check_files_build.ps1`을 `check_files.py`와 같은 폴더에 놓고 실행합니다.
 
 ```
 우클릭 → PowerShell로 실행

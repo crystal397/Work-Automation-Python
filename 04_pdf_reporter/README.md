@@ -75,10 +75,10 @@ python pdf_merger.py C:\산출물  C:\결과.pdf
 
 ## 🔨 EXE 빌드 방법
 
-`pdf_merger.py`와 같은 폴더에서 `build.bat`을 **더블클릭**하거나 명령 프롬프트에서 실행합니다.
+`pdf_merger.py`와 같은 폴더에서 `build.ps1`을 **우클릭 → PowerShell로 실행**합니다.
 
 ```
-build.bat
+우클릭 → PowerShell로 실행
 ```
 
 빌드가 완료되면 `dist/PDF합치기.exe` 파일이 생성됩니다.
@@ -100,15 +100,31 @@ build.bat
 ## 📦 배포 파일 목록
 
 ```
-📂 배포 폴더/
-├── dist/
-│   └── PDF합치기.exe      ← 실행 파일 (이것만 있으면 됨)
-├── pdf_merger.py          ← 소스 코드
-├── build.bat              ← EXE 빌드 스크립트
-└── README.md              ← 이 문서
+📂 04_pdf_reporter/
+├── pdf_merger.py                    ← 메인: CLI 기반 PDF 합치기 + 갑지 생성
+├── pdf_merger_v2.py                 ← v2: GUI 추가 버전
+├── pdf_merger_with_bookmark.py      ← 북마크 포함 버전 (PDF 목차 생성)
+├── pdf_merger_essential_numbers.py  ← 필수 번호만 처리하는 경량 버전
+├── pdf_size_splitter.py             ← PDF 파일 크기 기준 분할 도구
+├── excel_to_pdf.py                  ← Excel → PDF 변환기 (시트 선택 GUI)
+├── build.ps1                        ← EXE 빌드 스크립트 (PowerShell)
+└── README.md
 ```
 
 > 배포 시에는 `dist/PDF합치기.exe` **파일 하나만** 전달해도 됩니다.
+
+---
+
+## 📌 파일별 용도
+
+| 파일 | 설명 |
+|---|---|
+| `pdf_merger.py` | CLI + 기본 GUI. 폴더 구조로 갑지 생성 후 PDF 병합 |
+| `pdf_merger_v2.py` | GUI 강화 버전 |
+| `pdf_merger_with_bookmark.py` | PDF 북마크(목차) 자동 생성 포함 버전 |
+| `pdf_merger_essential_numbers.py` | 경량화 버전 |
+| `pdf_size_splitter.py` | 지정 크기(기본 2MB) 미만으로 PDF 분할 |
+| `excel_to_pdf.py` | 시트 선택 GUI로 Excel → PDF 변환 (제외 규칙 저장 가능) |
 
 ---
 
