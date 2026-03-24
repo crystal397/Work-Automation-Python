@@ -84,11 +84,6 @@ API_TYPES = {
     "rh_trade":   ("연립다세대 매매",   _B + "/RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade"),
     "sh_trade":   ("단독다가구 매매",   _B + "/RTMSDataSvcSHTrade/getRTMSDataSvcSHTrade"),
     "offi_trade": ("오피스텔 매매",     _B + "/RTMSDataSvcOffiTrade/getRTMSDataSvcOffiTrade"),
-    # 전월세
-    "apt_rent":   ("아파트 전월세",     _B + "/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"),
-    "rh_rent":    ("연립다세대 전월세", _B + "/RTMSDataSvcRHRent/getRTMSDataSvcRHRent"),
-    "sh_rent":    ("단독다가구 전월세", _B + "/RTMSDataSvcSHRent/getRTMSDataSvcSHRent"),
-    "offi_rent":  ("오피스텔 전월세",   _B + "/RTMSDataSvcOffiRent/getRTMSDataSvcOffiRent"),
 }
 
 # =============================================================
