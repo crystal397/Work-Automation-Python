@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 KMA_API_KEY = os.getenv("KMA_API_KEY")
-DB_URL = os.getenv("DB_URL", "sqlite:///weather.db")
+
+BASE_DIR = Path(__file__).parent
+DB_PATH  = BASE_DIR / "weather.db"
 
 # 현장 목록 (위도/경도 기반)
 SITES = [
