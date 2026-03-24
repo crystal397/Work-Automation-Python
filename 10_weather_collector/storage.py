@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, text
-from config import DB_URL
+from config import DB_PATH
 
-engine = create_engine(DB_URL)
+engine = create_engine(f"sqlite:///{DB_PATH}")
 
 def init_db():
     with engine.connect() as conn:
