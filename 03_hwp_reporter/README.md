@@ -18,12 +18,14 @@
 ```
 hwp_reporter/
 │
-├── main.py           # 메인 실행 파일 (파일 선택 → 읽기 → 입력 → 저장)
-├── excel_reader.py   # 엑셀에서 데이터를 읽는 모듈
-├── hwp_writer.py     # 한글 문서에 데이터를 입력하는 모듈
-├── utils.py          # 공통 헬퍼 함수 (포매터, 커서 이동 등)
-├── requirements.txt  # 의존 패키지 목록
-└── README.md
+├── main.py                    # 메인 실행 파일 (파일 선택 → 읽기 → 입력 → 저장)
+├── excel_reader.py            # 엑셀에서 데이터를 읽는 모듈
+├── hwp_writer.py              # 한글 문서에 데이터를 입력하는 모듈
+├── utils.py                   # 공통 헬퍼 함수 (포매터, 커서 이동 등)
+├── requirements.txt           # 의존 패키지 목록
+├── README.md
+└── one_file/
+    └── excel_to_hwp.py        # 단일 파일 버전 (모듈 분리 없이 전체 로직 통합)
 ```
 
 ---
