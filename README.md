@@ -1,7 +1,7 @@
 # Python Work — 건설/부동산 업무 자동화 도구 모음
 
 파이썬을 활용한 실무 밀착형 업무 자동화 및 데이터 분석 프로젝트입니다.
-건설·부동산 분야의 반복 업무를 자동화하는 10개의 독립 모듈로 구성되어 있습니다.
+건설·부동산 분야의 반복 업무를 자동화하는 11개의 독립 모듈로 구성되어 있습니다.
 
 ---
 
@@ -21,7 +21,8 @@ python work/
 ├── 07_lh-rental-price-matching/                  # LH 임대주택 실거래가 매칭
 ├── 08_molit_trade_collector/                     # 국토부 실거래가 대용량 수집
 ├── 09_pdf_invoice_extractor_and_excel_filler/    # 세금계산서 PDF 추출 → 엑셀 입력
-└── 10_weather_collector/                         # 기상청 ASOS 기상 데이터 수집
+├── 10_weather_collector/                         # 기상청 ASOS 기상 데이터 수집
+└── 11_claim_craft/                               # 공기연장 간접비 보고서 초안 생성
 ```
 
 ---
@@ -122,7 +123,7 @@ python pdf_merger.py [폴더경로] [출력파일.pdf]
 
 ### 05. 파일 무결성 검사
 
-폴더 내 파일을 재귀 탐색하여 상태를 검사하고 Excel 보고서 + 재송부 요청 문서 생성.
+폴더 내 파일을 재귀 탐색하여 상태를 검사하고 Excel 보고서 생성.
 
 - Excel / Word / PDF / PPT / ZIP / 7Z / RAR 포맷별 검사
 - 오류 분류: 빈 파일, 손상, 암호화, AIP/DRM
@@ -144,10 +145,12 @@ python check_files.py
 - 분류 그룹: A(노무) / B(기계) / C(광산물) / D(제조) / E(공공요금) / F(농림) / G1~G5(표준시장) / Z(기타)
 - 표준시장단가 9,607개 코드 매칭
 - E그룹이 Z/G 충돌 시 우선 적용
-- v7.0: 담당자 피드백 18개 규칙 반영
+- 기본비목(D/A/B)은 미표기, 재분류 항목만 A열 표기
+- N열에 검토사유 자동 기록
+- v8.0: 이사님 검토1 피드백 65건 전체 반영
 
 ```bash
-python item_group_auto_classification_v7.0.py
+python item_group_auto_classification_v8.0.py
 ```
 
 **의존성**: openpyxl
@@ -236,6 +239,24 @@ python scheduler.py    # 매일 6시 자동 수집 데몬 실행
 
 ---
 
+### 11. 공기연장 간접비 보고서 초안 생성
+
+HWP·HWPX·PDF·DOCX·PPTX·XLSX 수신자료에서 텍스트를 자동 추출하고, 핵심 수치를 파싱하여 Claude.ai 제출용 프롬프트를 생성.
+
+- 지원 형식: HWP/HWPX (Hancom COM), PDF, DOCX, PPTX, XLSX
+- 계약금액·착공준공일·공기연장일수·요율 6종·대상인원 자동 파싱
+- prompt.txt 템플릿에 추출 내용 자동 삽입 → `prompts/` 에 저장
+- **Windows 전용** (HWP COM API)
+
+```bash
+python extractor.py   # Step 1: 원본 파일 텍스트 추출
+python generate.py    # Step 2: 병합 + 파싱 + 프롬프트 생성
+```
+
+**의존성**: python-docx, python-pptx, openpyxl, PyMuPDF, pywin32
+
+---
+
 ## 주요 기능 요약
 
 | 모듈 | 처리 규모 | 핵심 기술 |
@@ -275,7 +296,7 @@ python scheduler.py    # 매일 6시 자동 수집 데몬 실행
 
 ## 참고 사항
 
-- **Windows 전용 모듈**: `01`, `03`, `04`는 pywin32 COM API 사용 (Windows만 동작)
+- **Windows 전용 모듈**: `01`, `03`, `04`, `11`은 pywin32 COM API 사용 (Windows만 동작)
 - **장경로 지원**: `05`는 Windows 260자 경로 제한을 UNC 경로(`\\?\`)로 우회
 - **API 일일 한도**: `08`은 국토부 API 일일 10,000건 한도를 유형별로 자동 관리
 - **Tesseract**: `09` OCR 기능 사용 시 Tesseract 및 한국어 언어팩(`kor`) 별도 설치 필요
