@@ -12,7 +12,10 @@
 | 계층 번호 자동 부여 | 1단계 → `1.`, 2단계 → `1.1.`, 3단계 → `1.1.1.` |
 | Excel → PDF 변환 | Microsoft Excel로 전체 시트를 PDF로 자동 변환 |
 | 파일 정렬 | 파일명 앞 숫자 기준으로 자동 정렬 (1., 2., 1.1., ...) |
-| 고정 갑지 | 맨 앞에 `# 첨부자료`, `추가공사비 집계표` 갑지 자동 삽입 |
+| 초기 갑지 커스텀 | GUI에서 맨 앞 갑지를 자유롭게 추가/삭제/순서변경 (v3) |
+| 시작 번호 지정 | 첫 번째 항목의 번호를 GUI에서 직접 지정 (예: 4부터 → 4., 5., 6. ...) (v3) |
+| 북마크 자동 생성 | PDF 합치기 시 목차(아웃라인) 자동 포함 (v3) |
+| 번호 없는 항목 지원 | 파일명에 번호가 없으면 번호 없이 이름만 갑지에 표기 (v3) |
 
 ---
 
@@ -53,35 +56,34 @@
 
 ### 방법 1: EXE 파일 사용 (권장)
 
-빌드 후 생성된 `dist/PDF합치기.exe`를 사용합니다.
+빌드 후 생성된 `dist/pdf_merger.exe`를 실행하면 GUI가 열립니다.
 
 ```
-PDF합치기.exe  C:\산출물
-PDF합치기.exe  C:\산출물  C:\결과.pdf
+pdf_merger.exe            ← GUI 실행
+pdf_merger.exe C:\산출물  ← 폴더 지정하여 GUI 실행
 ```
 
-> 출력 파일 경로를 생략하면 루트 폴더와 같은 위치에 `폴더명_merged.pdf`로 저장됩니다.
+> GUI에서 루트 폴더, 출력 경로, 초기 갑지, 시작 번호를 설정한 뒤 **합치기 시작**을 클릭합니다.
 
 ---
 
 ### 방법 2: Python으로 직접 실행
 
 ```bash
-python pdf_merger.py C:\산출물
-python pdf_merger.py C:\산출물  C:\결과.pdf
+python pdf_merger_v3.py
 ```
 
 ---
 
 ## 🔨 EXE 빌드 방법
 
-`pdf_merger.py`와 같은 폴더에서 `build.ps1`을 **우클릭 → PowerShell로 실행**합니다.
+`build.ps1`을 **우클릭 → PowerShell로 실행**합니다.
 
 ```
 우클릭 → PowerShell로 실행
 ```
 
-빌드가 완료되면 `dist/PDF합치기.exe` 파일이 생성됩니다.
+빌드가 완료되면 `dist/pdf_merger.exe` 파일이 생성됩니다. (`pdf_merger_v3.py` 기준으로 빌드)
 
 > **최초 1회만** 빌드하면 됩니다. 이후에는 exe 파일만 배포하면 됩니다.
 
@@ -101,13 +103,14 @@ python pdf_merger.py C:\산출물  C:\결과.pdf
 
 ```
 📂 04_pdf_reporter/
-├── pdf_merger.py                    ← 메인: CLI 기반 PDF 합치기 + 갑지 생성
-├── pdf_merger_v2.py                 ← v2: GUI 추가 버전
+├── pdf_merger_v3.py                 ← 현재 메인 (GUI, 갑지 커스텀, 시작 번호, 북마크)
+├── pdf_merger_v2.py                 ← v2: GUI 버전
+├── pdf_merger.py                    ← v1: CLI 기반 기본 버전
 ├── pdf_merger_with_bookmark.py      ← 북마크 포함 버전 (PDF 목차 생성)
 ├── pdf_merger_essential_numbers.py  ← 필수 번호만 처리하는 경량 버전
 ├── pdf_size_splitter.py             ← PDF 파일 크기 기준 분할 도구
 ├── excel_to_pdf.py                  ← Excel → PDF 변환기 (시트 선택 GUI)
-├── build.ps1                        ← EXE 빌드 스크립트 (PowerShell)
+├── build.ps1                        ← EXE 빌드 스크립트 (pdf_merger_v3.py 빌드)
 └── README.md
 ```
 
@@ -119,8 +122,9 @@ python pdf_merger.py C:\산출물  C:\결과.pdf
 
 | 파일 | 설명 |
 |---|---|
-| `pdf_merger.py` | CLI + 기본 GUI. 폴더 구조로 갑지 생성 후 PDF 병합 |
-| `pdf_merger_v2.py` | GUI 강화 버전 |
+| `pdf_merger_v3.py` | **현재 메인.** GUI + 초기 갑지 커스텀(추가/삭제/순서변경) + 시작 번호 지정 + 북마크 자동 생성 |
+| `pdf_merger_v2.py` | GUI 버전 (v3 이전) |
+| `pdf_merger.py` | CLI 기반 기본 버전 (v1) |
 | `pdf_merger_with_bookmark.py` | PDF 북마크(목차) 자동 생성 포함 버전 |
 | `pdf_merger_essential_numbers.py` | 경량화 버전 |
 | `pdf_size_splitter.py` | 지정 크기(기본 2MB) 미만으로 PDF 분할 |
