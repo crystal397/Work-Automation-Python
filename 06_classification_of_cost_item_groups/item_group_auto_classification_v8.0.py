@@ -1,24 +1,57 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-물가변동 비목군 자동분류 프로그램 v7.0
+물가변동 비목군 자동분류 프로그램 v8.0
 =======================================
 산출근거(산근) 엑셀 파일의 D열(품명)을 읽어 A열에 비목군 기호를 자동 표기
+국가계약법 계약예규 제68조 및 조달청 질의응답집(2025.10) 기준.
 
-v7.0 변경사항:
+비목군 기호:
+    A  노무비        (노동자 임금)
+    B  기계경비      (크레인, 굴삭기 등 대형 건설기계)
+    C  광산품        (잡석, 골재, 모래 등)
+    D  공산품        (철근, 시멘트, 페인트 등 공장 생산품)
+    E  전력·수도·가스·폐기물  (전기료, 수도요금, 폐기물처리비)
+    F  농림수산품    (묘목, 잔디 등)
+    G1~G5  표준시장단가  (토목/건축/설비/전기/통신)
+    Z  기타비목      (수수료, 부담금, 보험료, 용역비 등)
+
+v8.0 변경사항:
   - 표준시장단가목록 시트의 세부공종코드와 실제 비교하여 G1~G5 확정
   - 기본 비목(재료비→D, 노무비→A, 경비→B)은 표기하지 않음
     (다른 비목으로 재분류가 필요한 것만 표기)
+  - 상위 G1~G5이고 자체 코드 없는 분리행 → G 표기 (소액 경비 제외)
+  - GZZ 코드: 표준시장단가 아님
+  - GS60/GSS03 → E (전기요금)
+  - M코드 경비 → D (공산품)
+  - 사람 키워드 → A (주변행 Z보다 우선)
+  - 주변행 스캔: 호표 건너뜀, 60자↑ 품명 제외
+  - 공구손료(G열 경비 한정) → D
+  - E비목 우선 (E는 Z/G에 우선)
   - 이사님 검토1 피드백 65건 전체 반영
+
+분류 우선순위:
+    1. E비목 코드/키워드 (전력·수도·가스·폐기물)
+    2. 사람 키워드 → A
+    3. M코드 경비 → D
+    4. 표준시장단가 코드 매칭 (_BUILTIN_STD 9,607건)
+    5. _코드 시작 / 품명 '표준시장' → G1
+    6. 기계경비 키워드 → B
+    7. 주변행 스캔 키워드 (Z: 부가가치세·계측·부담금·용역비·제경비·기술료 등)
+    8. 기본비목 (재료비→D, 노무비→A, 경비→B)
 
 사용법:
     exe 실행 → 파일 선택 → 자동 분류 완료
     또는: classification_of_cost_item_groups.exe 산근파일.xlsx
 
-엑셀 구조:
+엑셀 구조 (입력):
     A열: 비목군(출력)  B열: 호표  C열: 코드  D열: 품명
     E열: 재료비  F열: 노무비  G열: 경비  H열: 합계
     + '표준시장단가목록' 시트 (B열: 세부공종코드, C열: 공사구분)
+
+출력:
+    A열: 재분류된 항목만 비목군 기호 표기 (기본비목 D/A/B는 빈칸)
+    N열: 검토사유 (참고용, 호표 내부 분류 기준으로 자동 표시)
 """
 
 import sys
@@ -89,6 +122,8 @@ E_KEYWORDS = [
     "도시가스", "가스요금", "난방용", "증기", "온수",
     "폐기물", "폐수", "분뇨처리", "하수", "폐기물처리",
     "폐기물수집", "폐기물운반", "폐기물 수집", "폐기물 운반",
+    # v8.0: 추가 E 키워드
+    "용수",
 ]
 
 F_KEYWORDS = [
@@ -96,6 +131,8 @@ F_KEYWORDS = [
     "화목", "원목", "비계목", "잔디",
     "수목", "소나무", "잡목", "지피류", "관목", "교목",
     "식재", "녹화", "객토",
+    # v8.0: 추가 F 키워드
+    "떼",
 ]
 
 B_KEYWORDS = [
@@ -104,7 +141,7 @@ B_KEYWORDS = [
     "그라우트펌프",
 ]
 
-E_CODES = ["K0810301B", "GS25W050", "GS26W060"]
+E_CODES = ["K0810301B", "GS25W050", "GS26W060", "GS60", "GSS03"]
 
 GTYPE_MAP = {
     "토목공사": "G1", "건축공사": "G2", "설비공사": "G3",
@@ -2673,6 +2710,14 @@ def classify_material(name, code=""):
     # 물, 식수 → E
     if re.search(r'\b물\b', n) and any(k in n for k in ["물 :", "물:", "식수", "물사용"]):
         return "E"
+    # v8.0: M54W004 코드 (물/보충수) → E
+    if "M54W004" in code:
+        return "E"
+    if "보충수" in n:
+        return "E"
+    # M0726xxx: 광산재료(석재·화강암류) → C (광산품)
+    if code.startswith("M0726"):
+        return "C"
     if _contains(name, C_KEYWORDS):
         return "C"
     if _contains(name, F_KEYWORDS):
@@ -2685,7 +2730,7 @@ def classify_material(name, code=""):
 # ================================================================
 #  경비 분류 (하위 행용)
 # ================================================================
-def classify_expense(code, name, parent):
+def classify_expense(code, name, parent, g_val=None):
     code = str(code or "").strip()
     name = _strip(name)
 
@@ -2698,6 +2743,10 @@ def classify_expense(code, name, parent):
         if "손료" in name:
             return "D"
         return "E"
+
+    # 수수료는 Z 선처리 (E_KEYWORDS의 "급수"가 "발급수수료" 등에 오매칭되는 것 방지)
+    if "수수료" in name:
+        return "Z"
 
     if _contains(name, E_KEYWORDS) and "전기뇌관" not in name:
         return "E"
@@ -2712,9 +2761,30 @@ def classify_expense(code, name, parent):
                                  "운전사", "운전원", "기능공"]):
         return "A"
 
+    # M54W004(보충수/물) 코드는 E (classify_material과 동일 처리)
+    if "M54W004" in code:
+        return "E"
+    if "보충수" in name:
+        return "E"
+
+    # v8.0: M코드 경비 → D (이사님: "대게 M으로 시작하는 코드는 D")
+    if code and code.startswith("M"):
+        return "D"
+
     # 기계경비 B (크레인 등 대형 건설기계만)
     if _contains(name, B_KEYWORDS):
         return "B"
+
+    # v8.0: 소액(10만미만) 손료/경장비 → D
+    # 단, Z 키워드(수수료, 보험 등)가 있으면 제외
+    if g_val is not None and 0 < abs(float(g_val)) < 100000:
+        z_kw = ["수수료", "보험", "부담금", "부가세", "제경비", "기술료"]
+        if not any(k in name for k in z_kw):
+            if "손료" in name or "손 료" in name:
+                return "D"
+            # 코드 없는 소액 경비 중 공구/경장비 패턴
+            if not code and ("%" in name or "0.0" in name):
+                return "D"
 
     # 공구손료, 장비손료(소형), 기구손료, 에어햄머 손료 → D
     if any(k in name for k in ["공구손료", "손료계산", "에어햄머", "에어호스"]):
@@ -2725,8 +2795,15 @@ def classify_expense(code, name, parent):
     if "기구손료" in name:
         return "D"
 
-    # 재료비(XX%), 잡재료, 잡품 → D
+    # v8.0: 품명에 "재료비"/"잡재료비" 명시 → D
     if ("재료비" in name or "잡재료" in name or "잡품" in name) and ("%" in name or "/" in name):
+        return "D"
+    if "재료비" in name and "명시" not in name:
+        # "재료비:" 또는 "재료비 :" 패턴 → D
+        import re as _re
+        if _re.search(r'재료비\s*:', name):
+            return "D"
+    if "잡재료비" in name:
         return "D"
     if "인력품" in name:
         return "D"
@@ -2785,7 +2862,16 @@ def classify_expense(code, name, parent):
                                  "집진기", "슬러지", "처리설비", "TMS",
                                  "모니터링", "측정및정리", "분석및보고",
                                  # 관리
-                                 "지급자재관리", "터널이동식"]):
+                                 "지급자재관리", "터널이동식",
+                                 # v8.0: 추가 Z 키워드
+                                 "안전장비", "알리미", "스마트밴드",
+                                 "관제시스템", "출입관리", "로고라이트",
+                                 "라인프로젝트", "통행료",
+                                 "직접경비", "유지관리비",
+                                 "문서작성비", "교육비",
+                                 "측정기경비", "해석비",
+                                 # 컴퓨터/소프트웨어 구입·손료 → Z (외부구입비 성격)
+                                 "컴퓨터", "소프트웨어", "S/W"]):
         return "Z"
 
     if "견적" in code or "견적" in name:
@@ -2828,7 +2914,7 @@ def classify_header(row, code, name, mat, lab, exp, ws, mx, std_map):
         if lab != 0:
             return "A"
         if exp != 0:
-            r = classify_expense(code, name, "Z")
+            r = classify_expense(code, name, "Z", g)
             return r if r else "Z"
     if has_gyun and nz == 0:
         return _classify_G_by_name(name)
@@ -2843,7 +2929,7 @@ def classify_header(row, code, name, mat, lab, exp, ws, mx, std_map):
     if lab != 0 and mat == 0 and exp == 0:
         return "A"
     if exp != 0 and mat == 0 and lab == 0:
-        r = classify_expense(code, name, "Z")
+        r = classify_expense(code, name, "Z", g)
         return r if r else "Z"
 
     # 7. 복합 비목 → G
@@ -2916,7 +3002,7 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
     """하위 행 분류. p_name은 상위 호표 품명."""
     code = str(code or "").strip()
     name = _strip(name)
-    # v7.0: 호표 품명은 제한적으로만 참조
+    # v8.0: 호표 품명은 제한적으로만 참조
     # - .E 분리코드(자기 품명이 "경 비: 금액"뿐인 경우)에서 폐기물/운반 등 판단용
     # - 호표 키워드로 멀리 떨어진 하위행을 일괄 Z로 만들지 않음
     # - combined = name + p_name 패턴은 사용하지 않음 (자기 품명만으로 분류)
@@ -2943,6 +3029,10 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
     if code.endswith(".M") or code.endswith(".L") or code.endswith(".E"):
         base = code[:-2]
 
+        # GS15W(도로통행료) → Z (표준시장단가 목록에 있어도 통행료 성격)
+        if base.startswith("GS15W"):
+            return "Z"
+
         # 표준시장단가 → 코드 매칭 결과의 G비목 (표기)
         std_g = is_std_market(base, name, std_map)
         if std_g:
@@ -2961,7 +3051,10 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
             if base.startswith("E0") and len(base) > 10:
                 r = classify_material(name, base)
             else:
-                combined = name  # v7.0: 자기 품명만으로 분류
+                # G_Z 패턴 코드 (G+_+Z...) → 1식 시설/유지관리 경비성 → Z
+                if base.startswith("G_Z"):
+                    return "Z"
+                combined = name  # v8.0: 자기 품명만으로 분류
                 r = classify_material(combined, base)
             return r
         # 일반 .L → A (노무비)
@@ -2972,7 +3065,10 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
             return "A"
         # GK 코드 경비 (.E) → 상위 품명 + 주변행 키워드로 분류
         if code.endswith(".E"):
-            combined = name  # v7.0: 자기 품명만으로 분류
+            # v8.0: GS60/GSS03(전기) → E
+            if base.startswith("GS60") or base.startswith("GSS03"):
+                return "E"
+            combined = name  # v8.0: 자기 품명만으로 분류
             # 주변 행에서 키워드 탐색
             for sr in range(max(row-5, 1), row):
                 sd = str(ws.cell(row=sr, column=4).value or "")
@@ -3008,7 +3104,7 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
                 return "Z"
             if any(k in p_name for k in ["용역", "작성비", "시험비"]):
                 return "Z"
-            r = classify_expense(code, combined, None)
+            r = classify_expense(code, combined, None, g)
             if r:
                 return r
             return default_bimok
@@ -3020,6 +3116,10 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
 
     # GZZ 견적서 (분리 안된 것, GZZZZZZ는 위에서 처리됨)
     if code.startswith("GZZ") and not code.startswith("GZZZZZ"):
+        # v8.0: GZZ 코드도 classify_expense로 재분류 시도
+        r = classify_expense(code, name, parent, g)
+        if r and r != "B":
+            return r
         if p_nz >= 2:
             return parent
         return default_bimok
@@ -3034,8 +3134,17 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
             if "손료" in name:
                 return "D"
             return "E"
-        combined = name  # v7.0: 자기 품명만으로 분류
-        # v7.0: 주변행(하위행 간) 스캔 - 범위 3행
+        # v8.0: GS60/GSS03(전기) → E
+        if code.startswith("GS60") or code.startswith("GSS03"):
+            return "E"
+        combined = name  # v8.0: 자기 품명만으로 분류
+        # v8.0: 사람 키워드 → A (주변행 스캔보다 우선)
+        if any(k in name for k in ["작업자", "전문작업자", "관리인", "감리원",
+                                     "기술자", "기능사", "기사", "조사원",
+                                     "관리원", "안전원", "보조원", "인부",
+                                     "운전사", "운전원", "기능공"]):
+            return "A"
+        # v8.0: 주변행(하위행 간) 스캔 - 범위 3행
         for sr in range(max(row-3, 1), row):
             sd = str(ws.cell(row=sr, column=4).value or "")
             sb = ws.cell(row=sr, column=2).value
@@ -3054,6 +3163,13 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
                 return "Z"
             if any(k in sd for k in ["용역비", "작성용역"]):
                 return "Z"
+            # v8.0: 추가 주변행 Z 키워드
+            if any(k in sd for k in ["제경비", "기술료", "검토비",
+                                      "문서작성", "교육훈련", "기타비",
+                                      "조사비", "평가비", "직접경비",
+                                      "통행료", "인쇄", "복사",
+                                      "측정기"]):
+                return "Z"
         # .E 분리코드에서만 p_name 제한적 참조 (폐기물/운반 등)
         if code.endswith(".E"):
             if "폐기물" in p_name and "운반" in p_name:
@@ -3066,7 +3182,7 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
                 return "Z"
             if any(k in p_name for k in ["부담금", "분담금", "평가", "용역", "시험비"]):
                 return "Z"
-        r = classify_expense(code, combined, None)
+        r = classify_expense(code, combined, None, g)
         if r:
             return r
         return default_bimok
@@ -3101,7 +3217,7 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
         # 차량 손료/연료 → D
         if any(k in name for k in ["손료", "손 료", "연료", "연 료"]):
             return "D"
-        combined = name  # v7.0: 자기 품명만으로 분류
+        combined = name  # v8.0: 자기 품명만으로 분류
         r = classify_material(combined, code)
         return r
 
@@ -3118,6 +3234,12 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
             return parent
         if any(k in name for k in ["부가세", "부가가치세"]):
             return "Z"
+        # v8.0: 직전 레이블 행에 부가가치세 → Z (명시적 처리)
+        # 경비 계산 행의 품명에 "부가가치세"가 없어도 직전 행 레이블로 판단
+        for lr in range(max(row-3, 1), row):
+            ld = str(ws.cell(row=lr, column=4).value or "")
+            if any(k in ld for k in ["부가가치세", "부가세"]):
+                return "Z"
         # 차량 손료/연료 → D (GS90 코드)
         if code.startswith("GS90") or code.startswith("M93"):
             return "D"
@@ -3133,7 +3255,14 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
         # 에어호스 → D (E 코드여도 에어호스는 재료비성)
         if any(k in name for k in ["에어호스"]):
             return "D"
-        # v7.0: 주변행(하위행 간) 스캔 - 바로 윗행에서 Z키워드 확인
+        # v8.0: 사람 키워드 → A (주변행 스캔보다 우선)
+        if any(k in name for k in ["비계공", "작업자", "전문작업자", "관리인",
+                                     "감리원", "기술자", "기능사", "기사",
+                                     "조사원", "관리원", "안전원", "보조원",
+                                     "인부", "운전사", "운전원", "기능공",
+                                     "용접공", "특별인부"]):
+            return "A"
+        # v8.0: 주변행(하위행 간) 스캔 - 바로 윗행에서 키워드 확인
         # 호표 품명이 아닌, 하위행 간의 문맥 참조
         for sr in range(max(row-3, 1), row):
             sd = str(ws.cell(row=sr, column=4).value or "")
@@ -3143,6 +3272,9 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
                 continue  # 호표는 건너뜀
             if len(sd.strip()) > 60:
                 continue  # 긴 설명 텍스트 제외
+            # v8.0: 공구손료 키워드 → D (G열 경비 한정)
+            if any(k in sd for k in ["공구손료"]):
+                return "D"
             if any(k in sd for k in ["부가가치세", "부가세"]):
                 return "Z"
             if any(k in sd for k in ["계측"]):
@@ -3151,8 +3283,15 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
                 return "Z"
             if any(k in sd for k in ["용역비", "작성용역"]):
                 return "Z"
-        combined = name  # v7.0: 자기 품명만으로 분류
-        r = classify_expense(code, combined, None)
+            # v8.0: 추가 주변행 Z 키워드
+            if any(k in sd for k in ["제경비", "기술료", "검토비",
+                                      "문서작성", "교육훈련", "기타비",
+                                      "조사비", "평가비", "직접경비",
+                                      "통행료", "인쇄", "복사",
+                                      "측정기"]):
+                return "Z"
+        combined = name  # v8.0: 자기 품명만으로 분류
+        r = classify_expense(code, combined, None, g)
         if r:
             return r
         # 코드 없는 경비 → 상위 품명 참조
@@ -3179,7 +3318,7 @@ def classify_sub(code, name, e, f, g, parent, p_nz, ws, row, std_map, p_name="")
 #  메인
 # ================================================================
 def process_file(input_path):
-    print(f"\n물가변동 비목군 자동분류 v7.0")
+    print(f"\n물가변동 비목군 자동분류 v8.0")
     print(f"{'='*50}")
     print(f"파일: {input_path}")
 
@@ -3221,6 +3360,7 @@ def process_file(input_path):
     # PASS 2: 하위 행
     print("[2] 하위 행 분류 중...")
     pb, pnz, p_name, sc = "Z", 0, "", 0
+    row_parent = {}  # v8.0: 각 행의 parent 기록
     for r in range(8, mx + 1):
         b = ws_data.cell(row=r, column=2).value
         h = ws_data.cell(row=r, column=8).value
@@ -3243,6 +3383,7 @@ def process_file(input_path):
             g = ws_data.cell(row=r, column=7).value
             bimok = classify_sub(c, d, e, f, g, pb, pnz, ws_data, r, std_map, p_name)
             ws_edit.cell(row=r, column=1).value = bimok
+            row_parent[r] = pb  # parent 기록
             sc += 1
         else:
             ws_edit.cell(row=r, column=1).value = None
@@ -3281,8 +3422,25 @@ def process_file(input_path):
             is_basic = True
         
         if is_basic:
-            ws_edit.cell(row=r, column=1).value = None
-            bc += 1
+            # v8.0: 상위(parent)가 G1~G5이고 자체 코드가 없는 경우
+            # → 기본비목이어도 G 표기 (상위 표준시장단가의 재·노·경 분리행)
+            # 단, 소액(10만미만) 경비는 제외 (공구손료 등 → D)
+            parent = row_parent.get(r, "")
+            c_val = str(ws_data.cell(row=r, column=3).value or "").strip()
+            # v8.0: 언더스코어 포함 비표준 코드의 .M/.L 분리코드 → 기본비목 표기 유지
+            # (GZZ00030A_01.M 등 _xx 접미 비표준 코드: 재료비→D, 노무비→A 표기)
+            if c_val and (c_val.endswith(".M") or c_val.endswith(".L")):
+                base_code = c_val[:-2]
+                if "_" in base_code:
+                    continue  # 기본비목 suppression 제외
+            g_amount = ws_data.cell(row=r, column=7).value
+            is_small_expense = (g_nz and not e_nz and not f_nz 
+                               and g_amount is not None and 0 < abs(float(g_amount)) < 100000)
+            if not c_val and parent in ("G1","G2","G3","G4","G5") and not is_small_expense:
+                ws_edit.cell(row=r, column=1).value = parent
+            else:
+                ws_edit.cell(row=r, column=1).value = None
+                bc += 1
     print(f"    → {bc:,}건 기본비목 미표기")
 
     # PASS 3: 검토 필요 항목 표시 (호표는 A열 미표기이므로 N열에 기록)
@@ -3419,7 +3577,7 @@ if __name__ == "__main__":
                 input("\n  Enter를 누르면 종료합니다...")
                 sys.exit(0)
         except Exception:
-            print("물가변동 비목군 자동분류 v7.0")
+            print("물가변동 비목군 자동분류 v8.0")
             print("-" * 40)
             print("사용법: classification_of_cost_item_groups.exe [엑셀파일]")
             input("\n  Enter를 누르면 종료합니다...")
