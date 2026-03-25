@@ -1,8 +1,12 @@
 # file
 *.xlsx
-
 *.db
 logs/
+*.pptx
+*.hwpx
+*.pdf
+
+메일 피드백 사항.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
