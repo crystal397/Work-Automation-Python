@@ -6,8 +6,8 @@
 chcp 65001 | Out-Null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$SRC_NAME = "item_group_auto_classification_v8.0"
-$EXE_NAME = "item_group_auto_classification_v8.0"
+$SRC_NAME = "item_group_auto_classification_v8.1"
+$EXE_NAME = "item_group_auto_classification_v8.1"
 
 Write-Host ""
 Write-Host "============================================"
