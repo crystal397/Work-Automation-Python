@@ -29,7 +29,8 @@
 
 ```
 06_classification_of_cost_item_groups/
-└── item_group_auto_classification_v8.0.py   ← 메인 스크립트
+└── item_group_auto_classification_v8.1.py   ← 메인 스크립트 (최신)
+└── item_group_auto_classification_v8.0.py   ← 이전 버전
 ```
 
 ---
@@ -57,7 +58,7 @@
 
 | 함수 | 역할 |
 |------|------|
-| `process_file(path)` | 전체 처리 진입점. PASS 1~3 순서대로 실행 |
+| `process_file(path)` | 전체 처리 진입점. PASS 0.5~4 순서대로 실행 |
 | `classify_header(...)` | 호표 행 분류 (내부 참조용, A열 미기재) |
 | `classify_sub(...)` | 하위 행 분류 (A열에 기재) |
 | `classify_material(name, code)` | 재료비 행 세부 분류 (C/D/E/F 판별) |
@@ -70,20 +71,24 @@
 ### 처리 순서 (PASS)
 
 ```
-PASS 1 │ 호표 행 분류
-       │ B열이 #.숫자인 합계행 → 내부 dict(header_bimok)에 저장
-       │ A열에는 기재하지 않음 (호표는 비분류 항목)
-       │
-PASS 2 │ 하위 행 분류
-       │ H열 합계가 0이거나 null이면 건너뜀
-       │ classify_sub() 호출 → A열에 비목군 기재
-       │
+PASS 0.5│ GZZZZZZ 분리코드 정규화  ← v8.1 신규
+        │ GZZZZZZ 코드 + .M/.L/.E 없는 행을 품명 패턴으로 자동 인식
+        │ → 코드에 .M/.L/.E 추가 + C열 노란색 표시 (자동 수정 마커)
+        │
+PASS 1  │ 호표 행 분류
+        │ B열이 #.숫자인 합계행 → 내부 dict(header_bimok)에 저장
+        │ A열에는 기재하지 않음 (호표는 비분류 항목)
+        │
+PASS 2  │ 하위 행 분류
+        │ H열 합계가 0이거나 null이면 건너뜀
+        │ classify_sub() 호출 → A열에 비목군 기재
+        │
 PASS 2.5│ 기본비목 미표기
-       │ 재료비→D, 노무비→A, 경비→B는 해당 비목의 기본값이므로 A열을 빈칸으로 처리
-       │ 예외: 자체 코드가 없고 상위 호표가 G1~G5이면 → G 기재 (소액 경비 제외)
-       │
-PASS 3 │ 검토 필요 항목 N열 기재
-       │ 호표 내 하위행 분류 기준 등 참고 사유 자동 표시
+        │ 재료비→D, 노무비→A, 경비→B는 해당 비목의 기본값이므로 A열을 빈칸으로 처리
+        │ 예외: 자체 코드가 없고 상위 호표가 G1~G5이면 → G 기재 (소액 경비 제외)
+        │
+PASS 3  │ 검토 필요 항목 N열 기재
+        │ 호표 내 하위행 분류 기준 등 참고 사유 자동 표시
 ```
 
 ### 분류 우선순위 (`classify_sub` 내부)
@@ -116,8 +121,8 @@ PASS 3 │ 검토 필요 항목 N열 기재
 
 ### Python으로 실행
 ```bash
-python item_group_auto_classification_v8.0.py            # GUI 파일 선택
-python item_group_auto_classification_v8.0.py 산근.xlsx  # 파일 직접 지정
+python item_group_auto_classification_v8.1.py            # GUI 파일 선택
+python item_group_auto_classification_v8.1.py 산근.xlsx  # 파일 직접 지정
 ```
 
 ### EXE로 실행
@@ -133,15 +138,25 @@ classification_of_cost_item_groups.exe 산근.xlsx   # 파일 직접 지정
 입력 파일명에 `_비목분류`가 붙은 새 파일로 저장됩니다.
 예) `산근.xlsx` → `산근_비목분류.xlsx`
 
-| A열 상태 | 의미 |
-|----------|------|
-| 빈칸 (호표 행) | 합계항목 — 비분류 |
-| 빈칸 (하위 행) | 기본비목(D/A/B)으로 분류됨 — 정상 |
-| 값 있음 | 기본비목이 아닌 다른 비목으로 재분류됨 |
+| 열 | 상태 | 의미 |
+|----|------|------|
+| A열 | 빈칸 (호표 행) | 합계항목 — 비분류 |
+| A열 | 빈칸 (하위 행) | 기본비목(D/A/B)으로 분류됨 — 정상 |
+| A열 | 값 있음 | 기본비목이 아닌 다른 비목으로 재분류됨 |
+| C열 | 노란색 | GZZZZZZ 코드에 .M/.L/.E 자동 추가됨 (v8.1) |
 
 **A열을 필터링하면 재분류된 항목만 검토 가능**
 
 **N열** (검토사유): 호표 내부 분류 기준 등 참고 정보를 자동으로 기재합니다.
+
+---
+
+## 버전 이력
+
+| 버전 | 주요 변경 |
+|------|----------|
+| v8.1 | GZZZZZZ 분리행 정규화: .M/.L/.E 자동 추가 + 노란색 표시 (5차 피드백) |
+| v8.0 | 이사님 검토1 피드백 65건 반영, 기본비목 미표기, GZZ/M코드/GS60 처리 등 |
 
 ---
 
