@@ -278,15 +278,29 @@ python main.py
 
 ---
 
-### 13. 한글 매크로 변환 (구버전 → 한글 2024)
+### 13. 한글 2024 매크로 도구
 
-한글 구버전 `.mcr` 매크로를 한글 2024 스크립트 매크로(`.msr`) 형식으로 변환 작업 중.
+한글 구버전 매크로 관련 유틸리티 및 문서 자동화 도구 모음.
 
-- 구버전 `.mcr` 파일 7종 보관 (한글 2024 미지원 바이너리 형식)
-  - `기본표`, `표옆`, `표안의표`, `표매크로`, `표표표`: 표 삽입·형식 자동화
-  - `삽`, `삽도명+크기`: 그림 삽입 및 캡션·크기 설정 자동화
-- 신규 `.msr` 파일: 한글 2024 JavaScript 기반 스크립트 매크로 형식
-- **작업 중** — 구버전 매크로 동작 분석 후 HWP COM API(pywin32) 또는 `.msr` 스크립트로 재구현 예정
+#### hwp_renumber — 표/그림 번호 재정렬
+
+HWPX 파일에서 뒤죽박죽된 `[표 N]` / `<그림 N>` 번호를 문서 순서대로 1부터 자동 재정렬.
+
+- HWPX(ZIP+XML)을 직접 수정 — HWP COM Find/Replace 우회
+  → 표 셀 안·글상자 안 등 위치 무관하게 동작
+- HWP 자동번호 필드(`<hp:autoNum>`) 자동 감지 → 번호 충돌 방지
+- Tkinter GUI: 파일 선택 다이얼로그 + 진행 로그 창
+- 한글이 열려 있으면 파일 경로 자동 감지 및 저장
+- 원본은 보존하고 `_renumbered.hwpx`로 별도 저장
+- PyInstaller EXE 빌드 가능 (`hwp_renumber.spec`)
+
+```bash
+python hwp_renumber.py
+# 또는
+pyinstaller hwp_renumber.spec   # → dist\hwp_renumber.exe
+```
+
+**의존성**: pywin32, tkinter (내장)
 
 ---
 

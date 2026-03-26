@@ -7,6 +7,12 @@ logs/
 *.pdf
 
 메일 피드백 사항.txt
+*.exe
+signalai_distribution.py
+SignalAI_사용법.txt
+승승아빠-한글매크로-250124(공개용)
+*.msr
+*.mcr
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -40,7 +46,7 @@ MANIFEST
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
-*.spec
+#*.spec
 
 # Installer logs
 pip-log.txt
