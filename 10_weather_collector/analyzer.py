@@ -186,8 +186,9 @@ def summarize(site: dict):
     # 공종별 분석
     results = [analyze_work(df, work) for work in works]
 
-    # 엑셀 저장
-    output_path = f"{site_id}_작업불가일.xlsx"
+    # 엑셀 저장 (exe/스크립트 위치 기준)
+    from config import BASE_DIR
+    output_path = BASE_DIR / f"{site_id}_작업불가일.xlsx"
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
 
         # 요약 시트

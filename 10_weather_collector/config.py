@@ -1,15 +1,21 @@
 import os
+import sys
 from pathlib import Path
 from datetime import date
 from dotenv import load_dotenv
 
-# 상위 폴더의 .env 로드
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+# exe(frozen)로 실행될 때는 exe 파일이 있는 폴더 기준, 스크립트 실행 시는 상위 폴더 기준
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent
+    load_dotenv(dotenv_path=BASE_DIR.parent / ".env")  # 개발 환경: 상위 폴더의 .env
+
+load_dotenv(dotenv_path=BASE_DIR / ".env")  # exe 환경: exe 옆의 .env (덮어쓰기)
 
 KMA_API_KEY = os.getenv("KMA_API_KEY")
 
-BASE_DIR = Path(__file__).parent
-DB_PATH  = BASE_DIR / "weather.db"
+DB_PATH = BASE_DIR / "weather.db"
 
 # 현장 목록 (위도/경도 기반)
 SITES = [
