@@ -1,9 +1,39 @@
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from config import KMA_API_KEY
 
 BASE_URL = "http://apis.data.go.kr/1360000/AsosDalyInfoService/getWthrDataList"
+
+
+def validate_station(station_code: str) -> bool:
+    """
+    관측소 코드가 ASOS API에서 유효한지 테스트 요청으로 확인.
+    최근 7일치 데이터를 요청해 'body' 키가 존재하면 유효한 관측소.
+    """
+    test_end = date.today() - timedelta(days=30)
+    test_start = test_end - timedelta(days=6)
+
+    params = {
+        "serviceKey": KMA_API_KEY,
+        "numOfRows":  7,
+        "pageNo":     1,
+        "dataType":   "JSON",
+        "dataCd":     "ASOS",
+        "dateCd":     "DAY",
+        "startDt":    test_start.strftime("%Y%m%d"),
+        "endDt":      test_end.strftime("%Y%m%d"),
+        "stnIds":     station_code,
+    }
+
+    try:
+        resp = requests.get(BASE_URL, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return "body" in data.get("response", {})
+    except Exception:
+        return False
+
 
 def fetch_daily_weather(station_code: str, start_date: str, end_date: str) -> list[dict]:
     """
