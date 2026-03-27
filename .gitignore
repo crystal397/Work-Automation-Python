@@ -2,7 +2,6 @@
 *.xlsx
 *.db
 logs/
-*.pptx
 *.hwpx
 *.pdf
 
