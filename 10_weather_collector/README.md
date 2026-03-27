@@ -1,6 +1,6 @@
 # 10_weather_collector
 
-기상청 ASOS(종관기상관측) API를 활용한 건설현장 기상데이터 Bulk 수집 및 작업불가일 산정 시스템
+기상청 ASOS(종관기상관측) API를 활용한 건설현장 기상데이터 수집 및 작업불가일 산정 시스템
 
 ---
 
@@ -22,11 +22,15 @@
 ├── .env                        ← API 키
 └── 10_weather_collector/
     ├── README.md
-    ├── config.py               ← 설정, API 키, 현장 목록 (공종별 작업 기간 포함)
-    ├── station_mapper.py       ← 현장 좌표 → 기상관측소 매핑 (727개소)
-    ├── kma_client.py           ← 기상청 API 호출 + 파싱
+    ├── gui.py                  ← GUI 실행기 (customtkinter) ★ 주 실행 파일
+    ├── main.py                 ← CLI 대화형 실행기
+    ├── build.bat               ← exe 빌드 스크립트
+    ├── .env.template           ← API 키 설정 템플릿
+    ├── config.py               ← 설정, API 키, DB 경로 (exe/스크립트 모드 자동 전환)
+    ├── station_mapper.py       ← 전국 관측소 목록 + 거리 계산
+    ├── kma_client.py           ← 기상청 API 호출 + 파싱 + 관측소 유효성 검증
     ├── storage.py              ← DB 저장 (SQLite)
-    ├── collector.py            ← 수집 오케스트레이터
+    ├── collector.py            ← 수집 오케스트레이터 (레거시 배치용)
     ├── scheduler.py            ← 매일 자동 실행 (APScheduler)
     └── analyzer.py             ← 공종별 작업불가일 산정 + 엑셀 출력
 ```
@@ -40,12 +44,12 @@
 [공공데이터포털](https://www.data.go.kr) 접속 후 아래 서비스 신청
 
 - 서비스명 : `기상청_지상(종관, ASOS) 일자료 조회서비스`
-- 승인 후 `일반 인증키(Encoding)` 복사
+- 승인 후 `일반 인증키(Decoding)` 복사
 
 ### 2. 패키지 설치
 
 ```bash
-pip install requests pandas sqlalchemy apscheduler python-dotenv openpyxl
+pip install requests pandas sqlalchemy python-dotenv openpyxl customtkinter
 ```
 
 ### 3. .env 파일 작성
@@ -58,66 +62,98 @@ KMA_API_KEY=발급받은키를여기에입력
 
 ---
 
+## 실행 방법
+
+### GUI 실행 (권장)
+
+```bash
+python gui.py
+```
+
+단계별 화면으로 안내합니다.
+
+| 단계 | 내용 |
+|---|---|
+| 1. 현장 정보 | 현장명, ID, 위도/경도 입력 |
+| 2. 관측소 선택 | 이름 검색 또는 좌표 기반 추천 → ASOS 유효 관측소만 자동 필터링 |
+| 3. 수집 기간 | 시작일 / 종료일 설정 |
+| 4. 공종 설정 | 프리셋 선택 + 플래그 체크박스 + 기간 지정 |
+| 5. 실행 | 설정 확인 → 진행바 + 실시간 로그 → 엑셀 자동 출력 |
+
+### CLI 대화형 실행
+
+```bash
+python main.py
+```
+
+터미널 환경에서 질문에 답하며 순서대로 진행합니다.
+
+### 배치 수집 (레거시)
+
+```bash
+python collector.py   # config.py의 SITES 기준 일괄 수집
+python analyzer.py    # 작업불가일 산정 + 엑셀 출력
+python scheduler.py   # 매일 오전 6시 자동 갱신
+```
+
+---
+
+## exe 배포
+
+### 빌드
+
+```
+build.bat 더블클릭
+```
+
+빌드 결과물:
+
+```
+dist\기상데이터수집기\
+  ├── 기상데이터수집기.exe   ← 실행 파일
+  ├── .env                  ← API 키 (빌드 시 자동 복사)
+  └── _internal\            ← 의존 라이브러리 (삭제 금지)
+```
+
+### 배포
+
+`기상데이터수집기` 폴더 전체를 ZIP으로 압축하여 전달합니다.
+받는 사람은 압축 해제 후 `기상데이터수집기.exe`를 실행합니다.
+
+> `.env` 파일에 `KMA_API_KEY`가 반드시 포함되어 있어야 합니다.
+> 실행 후 생성되는 `weather.db`와 `_작업불가일.xlsx`도 exe와 같은 폴더에 저장됩니다.
+
+---
+
 ## 파일별 설명
+
+### gui.py
+
+customtkinter 기반 데스크톱 GUI입니다. 5단계 wizard 방식으로 구성되어 있습니다.
+
+- 관측소 검색 시 ASOS API에 유효한 관측소만 병렬 자동 검증 후 표시
+- 검색 결과가 없으면 인근 좌표 기준으로 자동 대체 검색
+- 데이터 수집·관측소 유효성 확인은 백그라운드 스레드 처리 (UI 미 블로킹)
+
+---
 
 ### config.py
 
-API 키, DB 경로, 수집 대상 현장 목록을 관리합니다.
-각 현장에 **공종별 작업 기간(`works`)** 을 정의하면 `analyzer.py`에서 작업불가일을 자동으로 산정합니다.
+API 키, DB 경로를 관리합니다. exe(frozen) 실행 시 자동으로 exe 폴더 기준 경로로 전환됩니다.
 
 ```python
-SITES = [
-    {
-        "id":    "SITE001",
-        "name":  "수원 장안구 파장동~송죽동 현장",
-        "lat":   37.2723,
-        "lon":   126.9853,
-        "start": "2024-01-01",
-        "end":   "2025-12-31",
-
-        # 공종별 작업 기간 정의
-        "works": [
-            {
-                "name":  "토공사",
-                "start": "2024-01-01",
-                "end":   "2024-03-31",
-                "flags": ["is_rain_day", "is_snow_day", "is_freeze_day", "is_cold_day"]
-            },
-            {
-                "name":  "철근콘크리트공사",
-                "start": "2024-04-01",
-                "end":   "2024-09-30",
-                "flags": ["is_rain_day", "is_heat_day", "is_cold_day",
-                          "is_freeze_day", "is_wind_day"]
-            },
-            {
-                "name":  "타워크레인작업",
-                "start": "2024-04-01",
-                "end":   "2024-12-31",
-                "flags": ["is_wind_crane", "is_wind_day", "fog_yn"]
-            },
-            {
-                "name":  "도장·방수공사",
-                "start": "2025-01-01",
-                "end":   "2025-06-30",
-                "flags": ["is_rain_day", "rain_yn", "is_no_sunshine",
-                          "is_cold_day", "is_freeze_day"]
-            },
-        ]
-    },
-]
+# 스크립트 실행: 상위 폴더의 .env / 스크립트 폴더의 weather.db
+# exe 실행:      exe 옆의 .env    / exe 폴더의 weather.db
 ```
-
-현장 추가 시 `SITES` 리스트에 항목을 추가하면 됩니다.
 
 ---
 
 ### station_mapper.py
 
-현장의 위도·경도를 기준으로 가장 가까운 ASOS 관측소를 자동으로 찾아줍니다.
+전국 관측소 목록과 거리 계산 유틸리티를 제공합니다.
 
-- 기상청 공식 메타데이터 기준 **전국 727개소** 수록
-- Haversine 공식으로 직선거리 계산
+> **참고**: 목록에는 ASOS·AWS·특수 관측소가 혼재합니다.
+> GUI/CLI에서 관측소 선택 시 `validate_station()`으로 ASOS API 제공 여부를 자동 검증합니다.
 
 ```python
 from station_mapper import find_nearest_station
@@ -130,9 +166,17 @@ station = find_nearest_station(37.5172, 127.0473)
 
 ### kma_client.py
 
-기상청 ASOS 일자료 API를 호출하고 건설 관리에 필요한 항목을 파싱합니다.
+기상청 ASOS 일자료 API 호출, 파싱, 관측소 유효성 검증을 담당합니다.
 
-수집 항목:
+**주요 함수:**
+
+| 함수 | 설명 |
+|---|---|
+| `fetch_daily_weather(code, start, end)` | 일자료 수집 (365일 단위 분할 요청) |
+| `parse_weather(raw, site_id)` | API 응답 → 건설 관리 항목 변환 |
+| `validate_station(code)` | 관측소가 ASOS API에서 실제 데이터를 제공하는지 확인 |
+
+**수집 항목:**
 
 | 항목 | 설명 |
 |---|---|
@@ -153,85 +197,21 @@ station = find_nearest_station(37.5172, 127.0473)
 | `is_heat_day` | 최고기온 35℃ 이상 여부 |
 | `is_cold_day` | 최저기온 -10℃ 이하 여부 |
 | `is_no_sunshine` | 일조시간 2시간 미만 여부 |
-| `is_freeze_day` | 지면온도 0℃ 이하 여부 (지면 동결) |
-| `is_high_evap_day` | 증발량 10mm 이상 여부 (증발 과다) |
+| `is_freeze_day` | 지면온도 0℃ 이하 여부 |
+| `is_high_evap_day` | 증발량 10mm 이상 여부 |
 | `rain_yn` | 강수 유무 (iscs 기반, 소량 포함) |
 | `snow_yn` | 강설 유무 (iscs 기반, 눈·진눈깨비 포함) |
 | `fog_yn` | 안개 유무 (지속시간 또는 iscs 기반) |
-
-API 호출 제한(초당 1회)을 준수하며, 365일 단위로 청크 분할 요청합니다.
 
 ---
 
 ### storage.py
 
-수집한 데이터를 DB에 저장합니다.
+수집한 데이터를 SQLite DB에 저장합니다.
 
 - `UNIQUE(site_id, date)` 제약으로 중복 저장 방지
 - UPSERT 방식으로 재수집 시 최신 데이터로 갱신
-- DB 파일은 최초 실행 시 `10_weather_collector/weather.db`로 자동 생성
-
-테이블 구조:
-
-```sql
-CREATE TABLE weather_daily (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    site_id          TEXT NOT NULL,
-    date             TEXT NOT NULL,
-    station_code     TEXT,
-    temp_max         REAL,
-    temp_min         REAL,
-    precipitation    REAL,
-    wind_avg         REAL,
-    wind_max         REAL,
-    max_ins_wind     REAL,
-    snow_depth       REAL,
-    humidity_avg     REAL,
-    sunshine_hours   REAL,
-    ground_temp      REAL,
-    evaporation      REAL,
-    pressure         REAL,
-    is_rain_day      BOOLEAN,
-    is_wind_day      BOOLEAN,
-    is_wind_crane    BOOLEAN,
-    is_snow_day      BOOLEAN,
-    is_heat_day      BOOLEAN,
-    is_cold_day      BOOLEAN,
-    is_no_sunshine   BOOLEAN,
-    is_freeze_day    BOOLEAN,
-    is_high_evap_day BOOLEAN,
-    rain_yn          BOOLEAN,
-    snow_yn          BOOLEAN,
-    fog_yn           BOOLEAN,
-    UNIQUE(site_id, date)
-)
-```
-
----
-
-### collector.py
-
-전체 수집 흐름을 조율하는 오케스트레이터입니다.
-
-```
-현장 목록 → 관측소 매핑 → API 호출 → 파싱 → DB 저장
-```
-
-직접 실행 시:
-
-```bash
-python collector.py
-```
-
----
-
-### scheduler.py
-
-매일 오전 6시에 전날 데이터를 자동으로 갱신합니다.
-
-```bash
-python scheduler.py
-```
+- DB 파일 위치: 스크립트 실행 시 `10_weather_collector/weather.db`, exe 실행 시 exe 폴더
 
 ---
 
@@ -239,9 +219,8 @@ python scheduler.py
 
 DB에 저장된 기상 데이터를 바탕으로 **공종별 작업불가일을 산정**하고 엑셀 파일로 출력합니다.
 
-- `config.py`의 `works` 정의를 읽어 공종별 기간·플래그 적용
 - 동일 날짜에 여러 사유가 겹쳐도 작업불가일은 1일로 산정
-- 출력 파일: `{site_id}_작업불가일.xlsx`
+- 출력 파일: `{site_id}_작업불가일.xlsx` (exe/스크립트 실행 위치에 저장)
 
 엑셀 구성:
 
@@ -249,44 +228,6 @@ DB에 저장된 기상 데이터를 바탕으로 **공종별 작업불가일을 
 |---|---|
 | 요약 | 현장명, 공종별 총 일수 / 작업가능일 / 작업불가일, 사유별 집계 |
 | 공종명 (개별 시트) | 일별 기상 관측값 + 플래그(O/X) + 작업불가일 여부 |
-
-직접 실행 시:
-
-```bash
-python analyzer.py
-```
-
----
-
-## 실행 방법
-
-### 최초 실행 (과거 데이터 bulk 수집)
-
-```bash
-python collector.py
-```
-
-`config.py`의 `SITES`에 설정된 `start` ~ `end` 기간 전체를 수집합니다.
-
-### 작업불가일 산정 및 엑셀 출력
-
-```bash
-python analyzer.py
-```
-
-현장별 `{site_id}_작업불가일.xlsx` 파일이 생성됩니다.
-
-### 일배치 실행 (매일 자동 갱신)
-
-```bash
-python scheduler.py
-```
-
-서버 환경에서는 백그라운드 실행을 권장합니다.
-
-```bash
-nohup python scheduler.py &
-```
 
 ---
 
@@ -315,5 +256,5 @@ nohup python scheduler.py &
 
 - 출처 : 기상청 기상자료개방포털 (data.kma.go.kr)
 - 파일 : `META_관측지점정보.csv`
-- 기준 : 현재 운영 중인 관측소 (종료일 없음) / 국내 한정 (코드 < 1000)
-- 관측소 수 : 727개소
+- 관측소 수 : 727개소 (ASOS·AWS·특수 관측소 포함)
+- ASOS API 제공 여부는 실행 시 자동 검증
