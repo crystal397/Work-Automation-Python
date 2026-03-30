@@ -244,39 +244,47 @@ def to_extended_path(p: Path) -> Path:
         s = prefix + s
     return Path(s)
 
+MAX_DEPTH = 7
+
+total_cols = 1 + MAX_DEPTH + 3
+# 1: 번호
+# MAX_DEPTH: 폴더 depth
+# 3: 파일명, 파일형식, 비고
+
+last_col_letter = get_column_letter(total_cols)
 
 def get_folder_hierarchy(root: Path, filepath: Path) -> list:
     """루트 기준 상대 경로에서 폴더 계층 추출 (최대 4단계)"""
     rel = filepath.relative_to(root)
     parts = list(rel.parts[:-1])
-    while len(parts) < 4:
+    while len(parts) < MAX_DEPTH:
         parts.append("")
-    return parts[:4]
+    return parts[:MAX_DEPTH]
 
 
 def fill_parts(base_parts: list, zip_name: str) -> list:
     """압축파일명을 분류 빈 자리에 채워넣기. 빈 자리 없으면 세부분류 덮어쓰기."""
     parts = list(base_parts)
-    for i in range(3, -1, -1):
+    for i in range(MAX_DEPTH - 1, -1, -1):
         if parts[i] == "":
             parts[i] = zip_name
             return parts
-    parts[3] = zip_name
+    parts[MAX_DEPTH - 1] = zip_name
     return parts
 
 
 def make_rec(parts, fname, ftype, note, path_str):
-    return {
-        "대분류":   parts[0],
-        "중분류":   parts[1],
-        "소분류":   parts[2],
-        "세부분류": parts[3],
-        "파일명":   fname,
-        "파일형식": ftype,
-        "비고":     note,
-        "_path":    path_str,
-        "_flagged": bool(note),
+    rec = {
+        f"{i+1}단계": parts[i] for i in range(MAX_DEPTH)
     }
+    rec.update({
+        "파일명": fname,
+        "파일형식": ftype,
+        "비고": note,
+        "_path": path_str,
+        "_flagged": bool(note),
+    })
+    return rec
 
 
 def ext_to_label(ext: str) -> str:
@@ -369,7 +377,11 @@ TITLE_FONT  = Font(name="맑은 고딕", size=14, bold=True, color="FFFFFF")
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 LEFT   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 COL_WIDTHS = {"A": 5, "B": 16, "C": 28, "D": 28, "E": 28, "F": 40, "G": 28, "H": 18}
-HEADERS = ["번호", "대분류", "중분류", "소분류", "세부분류", "파일명", "파일형식", "비고"]
+HEADERS = [
+    "번호",
+    "1단계", "2단계", "3단계", "4단계", "5단계", "6단계", "7단계",
+    "파일명", "파일형식", "비고"
+]
 
 
 def write_cell(ws, row, col, value, font=None, fill=None, alignment=None, border=None):
@@ -394,7 +406,7 @@ def build_excel(records: list, out_path: str, folder_path: str):
 
     # 타이틀
     ws.row_dimensions[1].height = 28
-    ws.merge_cells("A1:H1")
+    ws.merge_cells(f"A1:{last_col_letter}1")
     c = ws["A1"]
     c.value     = f"수신자료 정리 / {datetime.now().strftime('%y%m%d')}_파일 수령 현황"
     c.font      = TITLE_FONT
@@ -403,7 +415,7 @@ def build_excel(records: list, out_path: str, folder_path: str):
 
     # 경로
     ws.row_dimensions[2].height = 18
-    ws.merge_cells("A2:H2")
+    ws.merge_cells(f"A2:{last_col_letter}2")
     c = ws["A2"]
     c.value     = f"대상 폴더: {folder_path}"
     c.font      = Font(name="맑은 고딕", size=8, italic=True, color="595959")
@@ -431,8 +443,7 @@ def build_excel(records: list, out_path: str, folder_path: str):
             WHITE_FILL
         )
 
-        vals = [idx, rec["대분류"], rec["중분류"], rec["소분류"],
-                rec["세부분류"], rec["파일명"], rec["파일형식"], bigo]
+        vals = [idx] + [rec[f"{i+1}단계"] for i in range(MAX_DEPTH)] + [rec["파일명"], rec["파일형식"], bigo]
 
         for col_idx, val in enumerate(vals, 1):
             font = (DAMAGE_FONT if is_flagged and col_idx in (6, 8)
@@ -446,9 +457,11 @@ def build_excel(records: list, out_path: str, folder_path: str):
             flagged_list.append(rec)
 
     # 집계
+    mid = total_cols // 2
+
     summary_row = 3 + len(records) + 2
     ws.row_dimensions[summary_row].height = 20
-    ws.merge_cells(f"A{summary_row}:E{summary_row}")
+    ws.merge_cells(f"A{summary_row}:{get_column_letter(mid)}{summary_row}")
     c = ws.cell(row=summary_row, column=1,
                 value=f"총 파일 수: {len([r for r in records if r['파일명']])}건")
     c.font = BOLD_FONT
@@ -456,8 +469,9 @@ def build_excel(records: list, out_path: str, folder_path: str):
     c.alignment = CENTER
     c.border = THIN_BORDER
 
-    ws.merge_cells(f"F{summary_row}:H{summary_row}")
-    c = ws.cell(row=summary_row, column=6, value=f"비고 기록: {len(flagged_list)}건")
+    start_col = mid + 1  # 병합 시작 컬럼
+    ws.merge_cells(f"{get_column_letter(start_col)}{summary_row}:{last_col_letter}{summary_row}")
+    c = ws.cell(row=summary_row, column=start_col, value=f"비고 기록: {len(flagged_list)}건")
     c.font = Font(name="맑은 고딕", size=9, bold=True, color="C00000")
     c.fill = DAMAGE_FILL
     c.alignment = CENTER
@@ -471,7 +485,7 @@ def build_excel(records: list, out_path: str, folder_path: str):
     ws2.column_dimensions["H"].width = 25
 
     ws2.row_dimensions[1].height = 28
-    ws2.merge_cells("A1:H1")
+    ws2.merge_cells(f"A1:{last_col_letter}1")
     c = ws2["A1"]
     c.value     = "비고 기록 파일 목록"
     c.font      = TITLE_FONT
