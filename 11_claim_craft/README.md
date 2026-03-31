@@ -134,13 +134,21 @@ prompts_cause/ (파트별 프롬프트 파일 5개)
 
 ```bash
 python setup_project.py 새프로젝트명
+# 다른 프로젝트를 기준으로 복사하려면:
+python setup_project.py 새프로젝트명 --source 다른프로젝트명
 ```
 
-생성되는 것:
-- `projects/새프로젝트명/` 하위 폴더 전체 (`수신자료/`, `processed/`, `참고예시/`, `prompts_cause/`, `prompts/`)
-- `config.py` — TODO 항목이 있는 빈 설정 파일
-- `sections_cause.py`, `sections.py` — 빈 섹션 템플릿
-- `참고예시/README.txt` — 예시 파일 작성 안내
+자동으로 생성/복사되는 것:
+
+| 항목 | 내용 |
+|------|------|
+| 폴더 구조 | `수신자료/`, `processed/`, `참고예시/`, `prompts_cause/`, `prompts/` |
+| `config.py` | 메타데이터 TODO 항목 포함 빈 설정 파일 (TARGETS는 --rescan으로 채움) |
+| `sections_cause.py` | 창원용원 기준으로 복사 + 상단 수정 안내 주석 추가 |
+| `sections.py` | 동일 |
+| `참고예시/*.txt` | 창원용원 예시 파일 4개 복사 (이 사건 예시 생기면 교체) |
+
+> 기본 복사 기준은 `창원용원`입니다. `--source` 옵션으로 다른 프로젝트를 지정할 수 있습니다.
 
 ### 2단계 — 수신자료 배치 후 TARGETS 자동 스캔
 
@@ -154,35 +162,27 @@ python setup_project.py 새프로젝트명 --rescan
 출력 파일명은 `01_파일명.txt`, `02_파일명.txt` 형식으로 자동 부여됩니다.
 필요 시 직접 수정하여 파일명·순서를 정리하세요.
 
-### 3단계 — config.py 수정
+### 3단계 — 텍스트 추출
 
-```python
-PROJECT_NAME    = "공사명"
-PLAINTIFF       = "원고명"
-DEFENDANT       = "피고명"
-CASE_NUMBER     = "사건번호"
-
-# 감정보고서 페이지 구성에 맞게 수정
-GDOC_CAUSE_PAGES     = set(range(10,  91))   # 원인분석 파트
-GDOC_31_32_PAGES     = set(range(91,  133))  # 사업주체 책임비율 파트
-GDOC_REST_PAGES      = set(range(446, 492))  # 집행예정·원상복구 파트
-GDOC_SUM_PAGES       = set(range(491, 514))  # 종합의견 파트
-GDOC_GITUPIP_1_PAGES = set(range(133, 290))  # 기투입비용 전반부
-GDOC_GITUPIP_2_PAGES = set(range(290, 446))  # 기투입비용 후반부
-
-# 페이지 필터 (감정보고서 등 대용량 PDF에서 사용)
-FILE_PAGE_FILTERS = {
-    "03_감정보고서_XXX": set(range(10, 91)),          # 제거할 페이지
-}
-FILE_KEEP_FILTERS = {
-    "03_감정보고서_원인분석부분": set(range(10, 91)), # 보존할 페이지
-}
+```bash
+python extractor.py 새프로젝트명
 ```
 
-### 4단계 — sections_cause.py 작성
+`수신자료/` 의 PDF·HWP·XLSX를 읽어 `processed/` 에 텍스트 파일로 저장합니다.
 
-이 사건의 쟁점에 맞게 파트별 출력 지침과 파일 목록을 작성합니다.
-`projects/창원용원/sections_cause.py` 를 참고하거나 그대로 복사 후 수정합니다.
+### 4단계 — config.py + sections_cause.py 작성 (Claude Code 사용)
+
+extractor.py 실행 후, Claude Code 대화창에서 아래처럼 요청합니다:
+
+```
+새프로젝트명 프로젝트의 config.py와 sections_cause.py를 작성해줘.
+processed/ 파일들을 읽고 사건 정보(공사명, 원고, 피고, 사건번호 등)와
+감정보고서 페이지 범위를 파악해서 config.py를 채우고,
+이 사건의 쟁점에 맞게 sections_cause.py도 창원용원 형식으로 만들어줘.
+```
+
+Claude Code가 `processed/` 파일들을 직접 읽고 사건 내용을 파악하여
+`config.py` 메타데이터·페이지 범위와 `sections_cause.py` 를 작성·저장합니다.
 
 ```python
 SECTIONS = [
@@ -204,25 +204,23 @@ SECTIONS = [
 ]
 ```
 
-### 5단계 — 참고예시 저장 (선택, 권장)
+### 5단계 — 참고예시 교체 (선택, 권장)
 
-완성된 유사 보고서가 있다면 장별로 텍스트를 저장합니다.
-있으면 Claude가 글의 길이·밀도·문체를 예시에 맞춰 작성하므로 결과물 품질이 크게 향상됩니다.
+1단계에서 창원용원 예시 4개가 이미 복사되어 있습니다.
+이 사건과 유사한 완성 보고서가 있다면 장별로 텍스트를 저장하여 덮어씁니다.
+없으면 창원용원 예시가 기본값으로 사용됩니다.
 
 ```
 projects/새프로젝트명/참고예시/
-    참고_part1_개요_예시.txt    ← 1장 텍스트 (3,000~5,000자 수준)
+    참고_part1_개요_예시.txt    ← 1장 텍스트
     참고_part2_예시.txt         ← 2장 텍스트
     참고_part3_예시.txt         ← 3장 텍스트
     참고_part4_예시.txt         ← 4장 텍스트
 ```
 
-### 6단계 — 텍스트 추출 및 프롬프트 생성
+### 6단계 — 프롬프트 생성
 
 ```bash
-# 수신자료 → processed/ 텍스트 추출
-python extractor.py 새프로젝트명
-
 # 원인·책임 분석 보고서 프롬프트 생성
 python generate_prompts_cause.py 새프로젝트명
 
