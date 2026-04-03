@@ -1,7 +1,7 @@
 # Python Work — 건설/부동산 업무 자동화 도구 모음
 
 파이썬을 활용한 실무 밀착형 업무 자동화 및 데이터 분석 프로젝트입니다.
-건설·부동산 분야의 반복 업무를 자동화하는 13개의 독립 모듈로 구성되어 있습니다.
+건설·부동산 분야의 반복 업무를 자동화하는 독립 모듈로 구성되어 있습니다.
 
 ---
 
@@ -12,6 +12,10 @@ python work/
 ├── .env                                          # API 키 및 인증 정보
 ├── README.md
 │
+├── 00_myworks/                                   # Claude.ai 활용 업무 결과물 모음 (코드 없음)
+│   ├── 14_용역수행계획서/                          # 역무구분 기준서
+│   ├── 17_전시&체험/                              # 전시·체험 종합기획서
+│   └── 19_공정팀_제안서/                           # 공정관리 용역 기술제안서
 ├── 01_web_automation/                            # 웹 자동화 (Selenium RPA)
 ├── 02_gis_visualization/                         # GIS 지오코딩 및 지도 시각화
 ├── 03_hwp_reporter/                              # 한글(HWP) 보고서 자동 작성
@@ -22,9 +26,12 @@ python work/
 ├── 08_molit_trade_collector/                     # 국토부 실거래가 대용량 수집
 ├── 09_pdf_invoice_extractor_and_excel_filler/    # 세금계산서 PDF 추출 → 엑셀 입력
 ├── 10_weather_collector/                         # 기상청 ASOS 기상 데이터 수집
-├── 11_claim_craft/                               # 공기연장 간접비 보고서 초안 생성
-├── 12_manhour_aggregation/                       # 돌관공사비 노임 시트 공수 취합 자동화
-└── 13_한글2024_macro/                            # 한글 구버전 매크로 → 한글 2024 형식 변환
+├── 11_report_craft/                              # 건설공사 분쟁 기술검토 보고서 작성 도구
+├── 12_manhour_aggregation/                       # 돌관공사비 노임 시트 공수 취합 (준비 중)
+├── 13_한글2024_macro/                            # 한글 구버전 매크로 → 한글 2024 형식 변환
+├── 15_논문 작성/                                  # 논문 작성 지원 (준비 중)
+├── 16_사토 운반관리/                              # 사토 운반 관리 자동화 (준비 중)
+└── 18_report_craft/                              # 공기연장 간접비 보고서 자동 생성
 ```
 
 ---
@@ -52,6 +59,19 @@ KMA_API_KEY=기상청_API_키
 ---
 
 ## 모듈별 요약
+
+### 00. Claude.ai 업무 결과물 모음
+
+코드 없이 Claude.ai를 활용하여 수행한 업무 산출물을 보관하는 폴더.
+보고서 초안, 분석 결과, 문서 작성 등 AI 협업 결과물을 프로젝트별로 정리.
+
+| 폴더 | 업무 내용 |
+|------|----------|
+| `14_용역수행계획서` | 프로젝트 기자재 역무구분 기준서 및 용역수행계획서 작성 |
+| `17_전시&체험` | 전시·체험 종합기획서 작성 (Claude.ai + Gemini 활용) |
+| `19_공정팀_제안서` | 공정관리 용역 기술제안서 작성 |
+
+---
 
 ### 01. 웹 자동화 (Selenium RPA)
 
@@ -241,40 +261,29 @@ python scheduler.py    # 매일 6시 자동 수집 데몬 실행
 
 ---
 
-### 11. 공기연장 간접비 보고서 초안 생성
+### 11. 건설공사 분쟁 기술검토 보고서 작성 도구
 
-HWP·HWPX·PDF·DOCX·PPTX·XLSX 수신자료에서 텍스트를 자동 추출하고, 핵심 수치를 파싱하여 Claude.ai 제출용 프롬프트를 생성.
+건설공사 분쟁 관련 **원인·책임 분석** 및 **손실금액 적정성 검토** 보고서 작성을 위한 Claude.ai 프롬프트 자동 생성 파이프라인.
 
-- 지원 형식: HWP/HWPX (Hancom COM), PDF, DOCX, PPTX, XLSX
-- 계약금액·착공준공일·공기연장일수·요율 6종·대상인원 자동 파싱
-- prompt.txt 템플릿에 추출 내용 자동 삽입 → `prompts/` 에 저장
+- 프로젝트(사건)별 폴더 구성 — 한 폴더 = 한 사건
+- 수신자료(PDF·HWP·XLSX)에서 텍스트 추출 후 섹션별 프롬프트 자동 생성
+- 보고서 유형별 템플릿 분리: 원인·책임 보고서 / 손실금액 보고서
+- 참고 예시 문서 기반 Claude 문체 학습 지원
 - **Windows 전용** (HWP COM API)
 
 ```bash
-python extractor.py   # Step 1: 원본 파일 텍스트 추출
-python generate.py    # Step 2: 병합 + 파싱 + 프롬프트 생성
+python extractor.py               # Step 1: 수신자료 텍스트 추출
+python generate_prompts.py        # Step 2: 손실금액 보고서 프롬프트 생성
+python generate_prompts_cause.py  # Step 2: 원인·책임 보고서 프롬프트 생성
 ```
 
 **의존성**: python-docx, python-pptx, openpyxl, PyMuPDF, pywin32
 
 ---
 
-### 12. 돌관공사비 노임 시트 공수 취합
+### 12. 돌관공사비 노임 시트 공수 취합 *(준비 중)*
 
-업체별 일용노무비 자료(xlsx/pdf)를 수집하여 산출내역서 노임 시트에 자동 기입.
-
-- input/ 폴더의 xlsx + pdf 파일 재귀 스캔 → 업체별 노무비 시트 자동 파싱
-- 지원 포맷: 일용노무비지급명세서 (날짜 그리드형), 대우건설식 xlsx, PDF 일용노무비
-- 연월별 인원 취합: 동일 인원 중복 시 출역일 최대값으로 합산
-- template/ 산출내역서에 연월별 노임 시트 자동 생성 및 1인당 2행 출역 기입
-- AD~BK 열 평일/토요일/일요일별 COUNTIF 수식 자동 입력
-- output/ 에 타임스탬프 파일명으로 저장
-
-```bash
-python main.py
-```
-
-**의존성**: openpyxl, pdfplumber
+업체별 일용노무비 자료를 취합하여 산출내역서 노임 시트에 자동 기입하는 도구.
 
 ---
 
@@ -304,6 +313,49 @@ pyinstaller hwp_renumber.spec   # → dist\hwp_renumber.exe
 
 ---
 
+### 15. 논문 작성 지원 *(준비 중)*
+
+건설·부동산 분야 논문 작성 지원 자동화 도구.
+
+---
+
+### 16. 사토 운반 관리 자동화 *(준비 중)*
+
+현장 사토 운반거리 산출 및 물량 정산 자동화 도구.
+
+---
+
+### 18. 공기연장 간접비 보고서 자동 생성
+
+수신자료(PDF·Excel·HWP·HTML·XML·TIF 등)를 넣으면 공기연장 간접비 산정 보고서(.docx)를 자동으로 생성.
+
+- **멀티포맷 추출**: 포맷별 폴백 체인 (예: PDF → pdfplumber → pymupdf → OCR 순)
+- **출처 태깅**: 모든 수치에 `파일명 | 페이지/시트` 출처 자동 기록
+- **품질 검사**: OK / WARN / FAIL 등급 — FAIL도 중단 없이 끝까지 진행
+- **tqdm 진행바**: 처리 중 남은 시간 표시, 중단 시 캐시로 이어서 재개
+- **보고서 유형 자동 판별**: A(지방계약법) / B(국가계약법) / C(민간)
+- **간접비 계산**: 실비/추정 분리, 산재·고용보험료, 일반관리비(한도 검증), 이윤(15% 한도)
+- **데이터 충족도 검사**: 생성 전 필수/권장 항목 미흡 시 조치 방법 안내
+- **Claude Code 연동**: API 미사용, Claude Code가 직접 파일 분석 → JSON 생성
+- **Windows 전용** (HWP COM API, Tesseract OCR)
+
+```bash
+# Step 1: 수신자료 텍스트 추출
+python main.py extract
+
+# Step 2: Claude Code에서 분석 요청
+# → "output/extracted_for_analysis.md 파일을 읽고 분석해서 output/analysis_result.json 으로 저장해줘"
+
+# Step 3: 보고서 생성
+python main.py generate
+```
+
+**출력**: `output/보고서_초안.md` + `output/보고서_초안.docx`
+
+**의존성**: pdfplumber, PyMuPDF, openpyxl, pandas, pytesseract, python-docx, pywin32, tqdm
+
+---
+
 ## 주요 기능 요약
 
 | 모듈 | 처리 규모 | 핵심 기술 |
@@ -312,6 +364,7 @@ pyinstaller hwp_renumber.spec   # → dist\hwp_renumber.exe
 | 07 LH 매칭 | 195,238건 임대주택 매칭 | 4단계 신뢰도, SQLite 캐시 |
 | 08 실거래가 | 68지역 × 4유형 × 10년 | 일일 한도 관리, 재개 기능 |
 | 10 기상 | 727개 관측소 자동 탐색 + 공종별 작업불가일 산정 | Haversine, APScheduler |
+| 18 보고서 | PDF·HWP·Excel 등 멀티포맷 → Word 보고서 | 폴백 체인, Claude Code 연동 |
 
 ### 공통 설계 패턴
 
@@ -333,18 +386,19 @@ pyinstaller hwp_renumber.spec   # → dist\hwp_renumber.exe
 | 지도/GIS | Folium, Requests, ThreadPoolExecutor |
 | 문서 처리 | python-docx, python-pptx, PyMuPDF, reportlab, pypdf, pdfplumber |
 | OCR | pytesseract, pdf2image |
-| 데이터베이스 | SQLite3, SQLAlchemy, PostgreSQL (선택) |
+| 데이터베이스 | SQLite3, SQLAlchemy |
 | 스케줄링 | APScheduler |
 | GUI | Tkinter |
 | 배포 | PyInstaller |
+| 진행 표시 | tqdm |
 | 외부 API | 카카오 로컬, 국토부 실거래가, 행안부 도로명주소, 기상청 ASOS |
 
 ---
 
 ## 참고 사항
 
-- **Windows 전용 모듈**: `01`, `03`, `04`, `11`은 pywin32 COM API 사용 (Windows만 동작)
+- **Windows 전용 모듈**: `01`, `03`, `04`, `11`, `18`은 pywin32 COM API 사용 (Windows만 동작)
 - **장경로 지원**: `05`는 Windows 260자 경로 제한을 UNC 경로(`\\?\`)로 우회
 - **API 일일 한도**: `08`은 국토부 API 일일 10,000건 한도를 유형별로 자동 관리
-- **Tesseract**: `09` OCR 기능 사용 시 Tesseract 및 한국어 언어팩(`kor`) 별도 설치 필요
-- **PDF 파싱**: `12`의 PDF 노무비 파싱은 텍스트 레이어가 있는 PDF만 지원 (스캔본 불가)
+- **Tesseract**: `09`, `18` OCR 기능 사용 시 Tesseract 및 한국어 언어팩(`kor`) 별도 설치 필요
+- **Claude Code 연동**: `18`은 Anthropic API 미사용 — Claude Code CLI가 직접 파일을 읽고 분석
