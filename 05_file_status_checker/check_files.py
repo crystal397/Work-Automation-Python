@@ -3,12 +3,14 @@
 - 폴더 내 모든 파일 순회 → 열림 여부 + 손상 여부 점검 → 엑셀 보고서 생성
 - 압축 파일(.zip/.7z/.rar) 내부 파일도 개별 점검
 - PDF 스캔본/텍스트 구분
+- 폴더 깊이(depth)는 실제 구조에서 자동 계산
 """
 
 import os
 import sys
 import zipfile
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from datetime import datetime
@@ -16,6 +18,7 @@ from datetime import datetime
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from tqdm import tqdm
 
 # ─────────────────────────────────────────────
 # 파일 형식 매핑
@@ -61,7 +64,14 @@ EXT_LABEL = {
     ".xml":  "XML 파일",
     ".json": "JSON 파일",
     ".mpp":  "Microsoft Project 파일",
+    ".log":  "LOG 파일",
+    ".bak":  "BAK 파일",
+    ".tmp":  "TMP 파일",
+    ".dwl":  "DWL 파일",
+    ".dwl2": "DWL2 파일",
+    ".xer":  "XER 파일",
 }
+
 
 # ─────────────────────────────────────────────
 # 파일 열기 시도
@@ -113,7 +123,6 @@ def try_open_file(filepath: Path) -> tuple:
             # 3차: 바이너리 분석
             try:
                 raw = filepath.read_bytes()
-                # OLE2 시그니처 확인
                 if raw[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
                     irm_kw = [b'\x06DataSpaces', b'EncryptionInfo', b'EncryptedPackage',
                               b'Rights Management', b'\x00I\x00R\x00M',
@@ -122,10 +131,8 @@ def try_open_file(filepath: Path) -> tuple:
                     if any(kw in raw for kw in irm_kw):
                         return ("열기 실패 (보안 문서: IRM/DRM 보호)", "")
                     return ("", "")
-                # HTML 기반 Excel
                 if b"<html" in raw[:1024].lower() or b"<table" in raw[:1024].lower():
                     return ("", "")
-                # CSV 형태
                 if len(raw.decode("utf-8", errors="ignore").strip()) > 0:
                     return ("", "")
             except Exception:
@@ -153,14 +160,12 @@ def try_open_file(filepath: Path) -> tuple:
             if doc.page_count == 0:
                 doc.close()
                 return ("파일 손상 (내용 없음)", "")
-            # AIP/DRM 보호 감지
             first_text = doc[0].get_text().lower()
             aip_kw = ["azure information protection", "this is a protected document",
                       "microsoft information protection", "rights management", "irm protected"]
             if any(kw in first_text for kw in aip_kw):
                 doc.close()
                 return ("열기 실패 (보안 문서: AIP/DRM 보호)", "")
-            # 스캔본 vs 텍스트 구분
             sample = min(doc.page_count, 5)
             total_chars = sum(len(doc[i].get_text().strip()) for i in range(sample))
             doc.close()
@@ -170,6 +175,146 @@ def try_open_file(filepath: Path) -> tuple:
         # ── 이메일
         elif ext in (".msg", ".eml"):
             return ("", "") if size > 100 else ("파일 손상 (내용 없음)", "")
+
+        # ── 한글 문서
+        elif ext in (".hwp", ".hwpx"):
+            if ext == ".hwpx":
+                # hwpx는 ZIP 기반
+                try:
+                    with zipfile.ZipFile(filepath, "r") as z:
+                        return ("", "") if z.namelist() else ("파일 손상 (내용 없음)", "")
+                except zipfile.BadZipFile:
+                    return ("파일 손상 (압축 구조 오류)", "")
+            # hwp는 OLE 기반 — 시그니처 확인 후 hwp5txt 시도
+            raw = filepath.read_bytes(8)
+            if raw != b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+                return ("파일 손상 (HWP 구조 오류)", "")
+            try:
+                result = subprocess.run(
+                    ["hwp5txt", str(filepath)],
+                    capture_output=True, timeout=15,
+                    encoding="utf-8", errors="replace"
+                )
+                if result.returncode == 0:
+                    return ("", "") if result.stdout.strip() else ("파일 손상 (내용 없음)", "")
+            except FileNotFoundError:
+                pass  # hwp5txt 미설치 → OLE 시그니처 정상이므로 OK
+            return ("", "")
+
+        # ── 이미지 — Pillow로 유효성 확인 및 해상도 표시
+        elif ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"):
+            try:
+                from PIL import Image
+                with Image.open(filepath) as img:
+                    img.verify()
+                with Image.open(filepath) as img:
+                    w, h = img.size
+                    mode = img.mode
+                return ("", f"{ext[1:].upper()} 이미지 ({w}×{h}, {mode})")
+            except ImportError:
+                return ("", "")  # Pillow 미설치
+            except Exception:
+                return ("파일 손상 (이미지 오류)", "")
+
+        # ── AutoCAD DXF — ezdxf로 파싱, 없으면 텍스트 시그니처 확인
+        elif ext == ".dxf":
+            try:
+                import ezdxf
+                doc = ezdxf.readfile(str(filepath))
+                count = len(list(doc.modelspace()))
+                return ("", f"AutoCAD DXF 도면 ({count:,}개 객체)")
+            except ImportError:
+                try:
+                    text = filepath.read_text(encoding="utf-8", errors="replace")
+                    if "SECTION" in text and "ENDSEC" in text:
+                        return ("", "")
+                    return ("파일 손상 (DXF 구조 오류)", "")
+                except Exception:
+                    return ("열기 실패", "")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
+
+        # ── AutoCAD DWG — 파일 시그니처(AC####) 확인
+        elif ext == ".dwg":
+            try:
+                sig = filepath.read_bytes()[:6]
+                if sig[:2] == b"AC":
+                    ver = sig.decode("ascii", errors="replace")
+                    return ("", f"AutoCAD 도면 ({ver})")
+                return ("파일 손상 (DWG 시그니처 오류)", "")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
+
+        # ── DWL / DWL2 — AutoCAD 잠금 파일 (텍스트)
+        elif ext in (".dwl", ".dwl2"):
+            try:
+                text = filepath.read_bytes().decode("utf-8", errors="replace")
+                return ("", "") if text.strip() else ("파일 손상 (내용 없음)", "")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
+
+        # ── XER — Primavera P6 (ERMHDR 시그니처 또는 XML)
+        elif ext == ".xer":
+            try:
+                head = filepath.read_bytes(200).decode("utf-8", errors="replace")
+                if "ERMHDR" in head:
+                    return ("", "")
+                import xml.etree.ElementTree as ET
+                ET.parse(str(filepath))
+                return ("", "")
+            except Exception:
+                try:
+                    if filepath.read_text(encoding="utf-8", errors="replace").strip():
+                        return ("", "")
+                except Exception:
+                    pass
+                return ("파일 손상 (XER 구조 오류)", "")
+
+        # ── 텍스트 계열 — 인코딩 순차 시도
+        elif ext in (".txt", ".log", ".csv", ".rtf"):
+            for enc in ("utf-8-sig", "utf-8", "cp949", "utf-16"):
+                try:
+                    text = filepath.read_text(encoding=enc)
+                    return ("", "") if text.strip() else ("파일 손상 (내용 없음)", "")
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            return ("열기 실패 (인코딩 불명)", "")
+
+        # ── 동영상 / 오디오 — 파일 시그니처 확인
+        elif ext in (".mp4", ".mov", ".avi", ".mp3"):
+            try:
+                raw = filepath.read_bytes(12)
+                if ext in (".mp4", ".mov") and raw[4:8] in (b"ftyp", b"moov", b"mdat", b"wide", b"free"):
+                    return ("", "")
+                if ext == ".avi" and raw[:4] == b"RIFF" and raw[8:12] == b"AVI ":
+                    return ("", "")
+                if ext == ".mp3" and (raw[:3] == b"ID3" or raw[:2] == b"\xff\xfb"):
+                    return ("", "")
+                # 시그니처 불일치 — 크기는 있으므로 경고만
+                return ("열기 실패 (시그니처 불일치)", "")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
+
+        # ── BAK / TMP — 시그니처로 원본 형식 추정
+        elif ext in (".bak", ".tmp"):
+            try:
+                raw = filepath.read_bytes(8)
+                if raw[:2] == b"PK":
+                    return ("", "ZIP 기반 백업 (docx/xlsx 등)")
+                if raw[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+                    return ("", "OLE 기반 백업 (doc/xls 등)")
+                if raw[:4] == b"%PDF":
+                    return ("", "PDF 기반 백업")
+                for enc in ("utf-8-sig", "utf-8", "cp949"):
+                    try:
+                        text = filepath.read_text(encoding=enc)
+                        if text.strip():
+                            return ("", "텍스트 기반 백업")
+                    except (UnicodeDecodeError, UnicodeError):
+                        continue
+                return ("", "바이너리 백업")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
 
         # ── 그 외: 크기로만 판단
         else:
@@ -244,39 +389,36 @@ def to_extended_path(p: Path) -> Path:
         s = prefix + s
     return Path(s)
 
-MAX_DEPTH = 7
 
-total_cols = 1 + MAX_DEPTH + 3
-# 1: 번호
-# MAX_DEPTH: 폴더 depth
-# 3: 파일명, 파일형식, 비고
+def ext_to_label(ext: str) -> str:
+    return EXT_LABEL.get(ext, ext[1:].upper() + " 파일" if ext else "알 수 없음")
 
-last_col_letter = get_column_letter(total_cols)
 
-def get_folder_hierarchy(root: Path, filepath: Path) -> list:
-    """루트 기준 상대 경로에서 폴더 계층 추출 (최대 4단계)"""
+def get_folder_hierarchy(root: Path, filepath: Path, max_depth: int) -> list:
+    """루트 기준 상대 경로에서 폴더 계층 추출 (max_depth 단계)"""
     rel = filepath.relative_to(root)
     parts = list(rel.parts[:-1])
-    while len(parts) < MAX_DEPTH:
+    while len(parts) < max_depth:
         parts.append("")
-    return parts[:MAX_DEPTH]
+    return parts[:max_depth]
 
 
-def fill_parts(base_parts: list, zip_name: str) -> list:
-    """압축파일명을 분류 빈 자리에 채워넣기. 빈 자리 없으면 세부분류 덮어쓰기."""
-    parts = list(base_parts)
-    for i in range(MAX_DEPTH - 1, -1, -1):
-        if parts[i] == "":
-            parts[i] = zip_name
-            return parts
-    parts[MAX_DEPTH - 1] = zip_name
-    return parts
+def _build_archive_parts(raw_fs_parts: list, zip_name: str,
+                         inner_folder_parts: list, max_depth: int) -> list:
+    """
+    압축 내부 항목의 계층 구성.
+    raw_fs_parts   : zip 파일이 있는 폴더까지의 경로 (패딩 없음)
+    zip_name       : zip 파일명 → 하나의 depth 열
+    inner_folder_parts : zip 내부 폴더 경로 부분 (패딩 없음)
+    """
+    parts = raw_fs_parts + [zip_name] + inner_folder_parts
+    while len(parts) < max_depth:
+        parts.append("")
+    return parts[:max_depth]
 
 
-def make_rec(parts, fname, ftype, note, path_str):
-    rec = {
-        f"{i+1}단계": parts[i] for i in range(MAX_DEPTH)
-    }
+def make_rec(parts: list, fname: str, ftype: str, note: str, path_str: str) -> dict:
+    rec = {f"{i+1}단계": parts[i] for i in range(len(parts))}
     rec.update({
         "파일명": fname,
         "파일형식": ftype,
@@ -287,38 +429,43 @@ def make_rec(parts, fname, ftype, note, path_str):
     return rec
 
 
-def ext_to_label(ext: str) -> str:
-    return EXT_LABEL.get(ext, ext[1:].upper() + " 파일" if ext else "알 수 없음")
-
-
 # ─────────────────────────────────────────────
 # 압축 내부 점검
 # ─────────────────────────────────────────────
 ARCHIVE_EXTS = {".zip", ".7z", ".rar"}
 
-def scan_archive(filepath: Path, base_parts: list, zip_name: str) -> list:
+
+def scan_archive(filepath: Path, raw_fs_parts: list, zip_name: str, max_depth: int) -> list:
+    """
+    raw_fs_parts: zip 파일이 있는 폴더까지의 경로 (패딩 없음)
+    zip 내부 폴더 구조를 depth 열에 직접 배분.
+    """
     records = []
     tmp_dir = Path(tempfile.mkdtemp(prefix="chk_"))
     try:
         ok, err = extract_archive(filepath, tmp_dir)
         if not ok:
-            parts = fill_parts(base_parts, zip_name)
+            parts = _build_archive_parts(raw_fs_parts, zip_name, [], max_depth)
             records.append(make_rec(parts, zip_name, ext_to_label(filepath.suffix.lower()), err, str(filepath)))
             return records
 
         inner_files = sorted(f for f in tmp_dir.rglob("*") if f.is_file())
         if not inner_files:
-            parts = fill_parts(base_parts, zip_name)
+            parts = _build_archive_parts(raw_fs_parts, zip_name, [], max_depth)
             records.append(make_rec(parts, "", "", "파일 손상 (빈 압축파일)", str(filepath)))
             return records
 
         for inner in inner_files:
+            inner_rel   = inner.relative_to(tmp_dir)
+            inner_parts = list(inner_rel.parts[:-1])   # 내부 폴더 경로
+            fname       = inner_rel.name               # 파일명만
+
             inner_ext = inner.suffix.lower()
-            rel_name = str(inner.relative_to(tmp_dir))
             note, ftype_override = try_open_file(inner)
             ftype = ftype_override if ftype_override else ext_to_label(inner_ext)
-            parts = fill_parts(base_parts, zip_name)
-            records.append(make_rec(parts, rel_name, ftype, note, str(filepath) + "/" + rel_name))
+            parts = _build_archive_parts(raw_fs_parts, zip_name, inner_parts, max_depth)
+            records.append(make_rec(parts, fname, ftype, note,
+                                    str(filepath) + "/" + str(inner_rel)))
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
     return records
@@ -327,36 +474,114 @@ def scan_archive(filepath: Path, base_parts: list, zip_name: str) -> list:
 # ─────────────────────────────────────────────
 # 폴더 순회
 # ─────────────────────────────────────────────
-def scan_folder(root: Path) -> list:
+def _peek_archive_depth(filepath: Path) -> int:
+    """압축 파일 내부의 최대 폴더 깊이 반환 (실패 시 0)"""
+    ext = filepath.suffix.lower()
+    try:
+        if ext == ".zip":
+            with zipfile.ZipFile(filepath, "r") as z:
+                depths = [
+                    len(Path(name.replace("\\", "/")).parts) - 1
+                    for name in z.namelist()
+                    if not name.endswith("/")
+                ]
+                return max(depths, default=0)
+        elif ext == ".7z":
+            import py7zr
+            with py7zr.SevenZipFile(filepath, mode="r") as z:
+                depths = [len(Path(n).parts) - 1 for n in z.getnames()
+                          if not n.endswith("/")]
+                return max(depths, default=0)
+        elif ext == ".rar":
+            import rarfile
+            with rarfile.RarFile(filepath, "r") as rf:
+                depths = [len(Path(i.filename).parts) - 1
+                          for i in rf.infolist() if not i.is_dir()]
+                return max(depths, default=0)
+    except Exception:
+        pass
+    return 0
+
+
+def _compute_max_depth(root: Path) -> int:
+    """
+    실제 폴더 + 압축 내부 구조까지 반영한 최대 깊이 계산 (최소 1).
+    일반 파일: 파일 위치까지의 폴더 depth
+    압축 파일: (파일 위치 depth) + 1(zip명) + (내부 폴더 depth)
+    """
+    # 먼저 모든 파일 목록 수집
+    all_files = []
+    for dirpath, _, filenames in os.walk(root):
+        fs_depth = len(Path(dirpath).relative_to(root).parts)
+        for fname in filenames:
+            all_files.append((Path(dirpath) / fname, fs_depth))
+
+    max_d = 1
+    archive_files = [(fp, d) for fp, d in all_files if fp.suffix.lower() in ARCHIVE_EXTS]
+    normal_files  = [(fp, d) for fp, d in all_files if fp.suffix.lower() not in ARCHIVE_EXTS]
+
+    # 일반 파일
+    for _, fs_depth in normal_files:
+        max_d = max(max_d, fs_depth)
+
+    # 압축 파일 — 내부 depth까지 합산 (진행바 표시)
+    if archive_files:
+        for fp, fs_depth in tqdm(archive_files, desc="압축 내부 depth 분석", unit="개"):
+            internal = _peek_archive_depth(fp)
+            max_d = max(max_d, fs_depth + 1 + internal)
+
+    return max(max_d, 1)
+
+
+def scan_folder(root: Path) -> tuple[list, int]:
+    """
+    폴더 전체를 순회하여 파일 점검 결과를 반환.
+    반환: (records, max_depth)
+    """
     records = []
     root = to_extended_path(root.resolve())
 
+    # 실제 폴더 깊이 계산
+    max_depth = _compute_max_depth(root)
+    print(f"[INFO] 폴더 최대 깊이: {max_depth}단계")
+
+    # 전체 파일 목록 수집 (tqdm 전체 카운트 확보)
+    all_entries = []  # (dir_path, fname | None)  None이면 빈 폴더
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
         dir_path = Path(dirpath)
-
         if not filenames:
             has_child = any(files for _, _, files in os.walk(dirpath))
             if not has_child:
-                parts = get_folder_hierarchy(root, dir_path / "_dummy_")
+                all_entries.append((dir_path, None))
+        else:
+            for fname in sorted(filenames):
+                all_entries.append((dir_path, fname))
+
+    # 점검
+    with tqdm(all_entries, desc="파일 점검", unit="개", dynamic_ncols=True) as bar:
+        for dir_path, fname in bar:
+            if fname is None:
+                parts = get_folder_hierarchy(root, dir_path / "_dummy_", max_depth)
                 rec = make_rec(parts, "", "", "폴더 비었음", str(dir_path))
                 rec["_flagged"] = False
                 records.append(rec)
-            continue
+                continue
 
-        for fname in sorted(filenames):
+            bar.set_postfix(파일=fname[:30])
             fpath = dir_path / fname
             ext = fpath.suffix.lower()
-            parts = get_folder_hierarchy(root, fpath)
+            parts = get_folder_hierarchy(root, fpath, max_depth)
 
             if ext in ARCHIVE_EXTS:
-                records.extend(scan_archive(fpath, parts, fname))
+                raw_fs_parts = list(fpath.relative_to(root).parts[:-1])
+                records.extend(scan_archive(fpath, raw_fs_parts, fname, max_depth))
             else:
                 note, ftype_override = try_open_file(fpath)
                 ftype = ftype_override if ftype_override else ext_to_label(ext)
                 records.append(make_rec(parts, fname, ftype, note, str(fpath)))
 
-    return records
+    return records, max_depth
 
 
 # ─────────────────────────────────────────────
@@ -376,12 +601,6 @@ DAMAGE_FONT = Font(name="맑은 고딕", size=9, color="C00000", bold=True)
 TITLE_FONT  = Font(name="맑은 고딕", size=14, bold=True, color="FFFFFF")
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 LEFT   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
-COL_WIDTHS = {"A": 5, "B": 16, "C": 28, "D": 28, "E": 28, "F": 40, "G": 28, "H": 18}
-HEADERS = [
-    "번호",
-    "1단계", "2단계", "3단계", "4단계", "5단계", "6단계", "7단계",
-    "파일명", "파일형식", "비고"
-]
 
 
 def write_cell(ws, row, col, value, font=None, fill=None, alignment=None, border=None):
@@ -396,13 +615,26 @@ def write_cell(ws, row, col, value, font=None, fill=None, alignment=None, border
 # ─────────────────────────────────────────────
 # 엑셀 보고서 생성
 # ─────────────────────────────────────────────
-def build_excel(records: list, out_path: str, folder_path: str):
+def build_excel(records: list, out_path: str, folder_path: str, max_depth: int):
+    # depth에 따라 동적으로 계산
+    total_cols    = 1 + max_depth + 3          # 번호 + N단계 + 파일명 + 파일형식 + 비고
+    last_col_letter = get_column_letter(total_cols)
+    headers       = ["번호"] + [f"{i+1}단계" for i in range(max_depth)] + ["파일명", "파일형식", "비고"]
+
+    # 열 너비: 번호(5) | 단계열(20 each) | 파일명(40) | 파일형식(20) | 비고(28)
+    col_widths = [5] + [20] * max_depth + [40, 20, 28]
+
+    # 파일명·파일형식·비고 열 인덱스 (1-based)
+    fname_col  = 1 + max_depth + 1
+    ftype_col  = 1 + max_depth + 2
+    note_col   = 1 + max_depth + 3
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "수신자료 정리"
 
-    for col_letter, width in COL_WIDTHS.items():
-        ws.column_dimensions[col_letter].width = width
+    for col_idx, width in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
 
     # 타이틀
     ws.row_dimensions[1].height = 28
@@ -424,13 +656,18 @@ def build_excel(records: list, out_path: str, folder_path: str):
 
     # 헤더
     ws.row_dimensions[3].height = 22
-    for col_idx, hdr in enumerate(HEADERS, 1):
+    for col_idx, hdr in enumerate(headers, 1):
         write_cell(ws, 3, col_idx, hdr, font=HEADER_FONT, fill=HEADER_FILL,
                    alignment=CENTER, border=THIN_BORDER)
 
     # 데이터
     flagged_list = []
-    for row_num, (idx, rec) in enumerate(enumerate(records, 1), 4):
+    center_cols = {1, fname_col, ftype_col, note_col}
+
+    for row_num, (idx, rec) in tqdm(
+        enumerate(enumerate(records, 1), 4),
+        total=len(records), desc="엑셀 작성", unit="행"
+    ):
         ws.row_dimensions[row_num].height = 16
         is_flagged = rec["_flagged"]
         bigo = rec["비고"]
@@ -443,14 +680,17 @@ def build_excel(records: list, out_path: str, folder_path: str):
             WHITE_FILL
         )
 
-        vals = [idx] + [rec[f"{i+1}단계"] for i in range(MAX_DEPTH)] + [rec["파일명"], rec["파일형식"], bigo]
+        vals = ([idx]
+                + [rec[f"{i+1}단계"] for i in range(max_depth)]
+                + [rec["파일명"], rec["파일형식"], bigo])
 
         for col_idx, val in enumerate(vals, 1):
-            font = (DAMAGE_FONT if is_flagged and col_idx in (6, 8)
+            font = (DAMAGE_FONT if is_flagged and col_idx in (fname_col, note_col)
                     else BOLD_FONT if col_idx == 1
                     else NORMAL_FONT)
-            write_cell(ws, row_num, col_idx, val, font=font, fill=row_fill,
-                       alignment=CENTER if col_idx in (1, 7, 8) else LEFT,
+            write_cell(ws, row_num, col_idx, val,
+                       font=font, fill=row_fill,
+                       alignment=CENTER if col_idx in center_cols else LEFT,
                        border=THIN_BORDER)
 
         if is_flagged and not is_empty:
@@ -458,9 +698,9 @@ def build_excel(records: list, out_path: str, folder_path: str):
 
     # 집계
     mid = total_cols // 2
-
     summary_row = 3 + len(records) + 2
     ws.row_dimensions[summary_row].height = 20
+
     ws.merge_cells(f"A{summary_row}:{get_column_letter(mid)}{summary_row}")
     c = ws.cell(row=summary_row, column=1,
                 value=f"총 파일 수: {len([r for r in records if r['파일명']])}건")
@@ -469,7 +709,7 @@ def build_excel(records: list, out_path: str, folder_path: str):
     c.alignment = CENTER
     c.border = THIN_BORDER
 
-    start_col = mid + 1  # 병합 시작 컬럼
+    start_col = mid + 1
     ws.merge_cells(f"{get_column_letter(start_col)}{summary_row}:{last_col_letter}{summary_row}")
     c = ws.cell(row=summary_row, column=start_col, value=f"비고 기록: {len(flagged_list)}건")
     c.font = Font(name="맑은 고딕", size=9, bold=True, color="C00000")
@@ -479,10 +719,8 @@ def build_excel(records: list, out_path: str, folder_path: str):
 
     # 비고 목록 시트
     ws2 = wb.create_sheet("비고 기록 파일 목록")
-    for col_letter, width in COL_WIDTHS.items():
-        ws2.column_dimensions[col_letter].width = width
-    ws2.column_dimensions["F"].width = 50
-    ws2.column_dimensions["H"].width = 25
+    for col_idx, width in enumerate(col_widths, 1):
+        ws2.column_dimensions[get_column_letter(col_idx)].width = width
 
     ws2.row_dimensions[1].height = 28
     ws2.merge_cells(f"A1:{last_col_letter}1")
@@ -493,20 +731,21 @@ def build_excel(records: list, out_path: str, folder_path: str):
     c.alignment = CENTER
 
     ws2.row_dimensions[2].height = 22
-    for col_idx, hdr in enumerate(HEADERS, 1):
+    for col_idx, hdr in enumerate(headers, 1):
         write_cell(ws2, 2, col_idx, hdr, font=HEADER_FONT,
                    fill=PatternFill("solid", fgColor="C00000"),
                    alignment=CENTER, border=THIN_BORDER)
 
     for r_idx, rec in enumerate(flagged_list, 3):
         ws2.row_dimensions[r_idx].height = 16
-        vals = [r_idx - 2, rec["대분류"], rec["중분류"], rec["소분류"],
-                rec["세부분류"], rec["파일명"], rec["파일형식"], rec["비고"]]
+        vals = ([r_idx - 2]
+                + [rec[f"{i+1}단계"] for i in range(max_depth)]
+                + [rec["파일명"], rec["파일형식"], rec["비고"]])
         for col_idx, val in enumerate(vals, 1):
             write_cell(ws2, r_idx, col_idx, val,
-                       font=DAMAGE_FONT if col_idx in (6, 8) else NORMAL_FONT,
+                       font=DAMAGE_FONT if col_idx in (fname_col, note_col) else NORMAL_FONT,
                        fill=DAMAGE_FILL,
-                       alignment=CENTER if col_idx in (1, 7, 8) else LEFT,
+                       alignment=CENTER if col_idx in center_cols else LEFT,
                        border=THIN_BORDER)
 
     wb.save(out_path)
@@ -560,13 +799,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print(f"[INFO] 폴더 순회 시작: {folder_path}")
-    records = scan_folder(folder)
+    records, max_depth = scan_folder(folder)
     print(f"[INFO] 총 {len(records)}건 확인 완료")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     excel_out = f"수신자료_파일점검결과_{timestamp}.xlsx"
 
-    flagged = build_excel(records, excel_out, folder_path)
+    flagged = build_excel(records, excel_out, folder_path, max_depth)
     print(f"[OK] 엑셀 보고서 저장: {excel_out}")
     print(f"[INFO] 비고 기록 파일: {len(flagged)}건")
 
@@ -575,7 +814,9 @@ if __name__ == "__main__":
     if flagged:
         print(f"\n  비고 기록 파일 목록 ({len(flagged)}건):")
         for rec in flagged:
-            cat = " > ".join(v for v in [rec["대분류"], rec["중분류"], rec["소분류"], rec["세부분류"]] if v)
+            cat = " > ".join(
+                rec[f"{i+1}단계"] for i in range(max_depth) if rec[f"{i+1}단계"]
+            )
             print(f"    [{cat}]  {rec['파일명']}  →  {rec['비고']}")
 
     input("\n엔터를 눌러 종료...")
