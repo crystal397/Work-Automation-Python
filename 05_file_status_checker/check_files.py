@@ -186,7 +186,7 @@ def try_open_file(filepath: Path) -> tuple:
                 except zipfile.BadZipFile:
                     return ("파일 손상 (압축 구조 오류)", "")
             # hwp는 OLE 기반 — 시그니처 확인 후 hwp5txt 시도
-            raw = filepath.read_bytes(8)
+            raw = filepath.read_bytes()[:8]
             if raw != b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
                 return ("파일 손상 (HWP 구조 오류)", "")
             try:
@@ -256,7 +256,7 @@ def try_open_file(filepath: Path) -> tuple:
         # ── XER — Primavera P6 (ERMHDR 시그니처 또는 XML)
         elif ext == ".xer":
             try:
-                head = filepath.read_bytes(200).decode("utf-8", errors="replace")
+                head = filepath.read_bytes()[:200].decode("utf-8", errors="replace")
                 if "ERMHDR" in head:
                     return ("", "")
                 import xml.etree.ElementTree as ET
@@ -283,7 +283,7 @@ def try_open_file(filepath: Path) -> tuple:
         # ── 동영상 / 오디오 — 파일 시그니처 확인
         elif ext in (".mp4", ".mov", ".avi", ".mp3"):
             try:
-                raw = filepath.read_bytes(12)
+                raw = filepath.read_bytes()[:12]
                 if ext in (".mp4", ".mov") and raw[4:8] in (b"ftyp", b"moov", b"mdat", b"wide", b"free"):
                     return ("", "")
                 if ext == ".avi" and raw[:4] == b"RIFF" and raw[8:12] == b"AVI ":
@@ -298,7 +298,7 @@ def try_open_file(filepath: Path) -> tuple:
         # ── BAK / TMP — 시그니처로 원본 형식 추정
         elif ext in (".bak", ".tmp"):
             try:
-                raw = filepath.read_bytes(8)
+                raw = filepath.read_bytes()[:8]
                 if raw[:2] == b"PK":
                     return ("", "ZIP 기반 백업 (docx/xlsx 등)")
                 if raw[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
