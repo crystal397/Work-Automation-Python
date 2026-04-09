@@ -15,6 +15,16 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")  # exe 환경: exe 옆의 .env (덮�
 
 KMA_API_KEY = os.getenv("KMA_API_KEY")
 
+
+def save_api_key(key: str) -> None:
+    """API 키를 .env 파일에 저장하고 현재 프로세스에도 반영한다."""
+    env_path = BASE_DIR / ".env"
+    env_path.write_text(f"KMA_API_KEY={key.strip()}\n", encoding="utf-8")
+    os.environ["KMA_API_KEY"] = key.strip()
+    # 모듈 수준 변수도 갱신
+    import config as _self
+    _self.KMA_API_KEY = key.strip()
+
 DB_PATH = BASE_DIR / "weather.db"
 
 # 현장 목록 (위도/경도 기반)

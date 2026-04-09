@@ -1,9 +1,18 @@
+import os
 import requests
 import time
 from datetime import datetime, timedelta, date
-from config import KMA_API_KEY
+import config as _config
 
 BASE_URL = "http://apis.data.go.kr/1360000/AsosDalyInfoService/getWthrDataList"
+
+# 하위 호환: 직접 임포트하던 코드 대응
+KMA_API_KEY = None  # 실제 값은 _config.KMA_API_KEY 또는 os.getenv에서 가져옴
+
+
+def _get_api_key() -> str:
+    """항상 최신 API 키를 반환한다."""
+    return _config.KMA_API_KEY or os.getenv("KMA_API_KEY", "")
 
 
 def validate_station(station_code: str) -> bool:
@@ -15,7 +24,7 @@ def validate_station(station_code: str) -> bool:
     test_start = test_end - timedelta(days=6)
 
     params = {
-        "serviceKey": KMA_API_KEY,
+        "serviceKey": _get_api_key(),
         "numOfRows":  7,
         "pageNo":     1,
         "dataType":   "JSON",
@@ -30,8 +39,14 @@ def validate_station(station_code: str) -> bool:
         resp = requests.get(BASE_URL, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        return "body" in data.get("response", {})
-    except Exception:
+        result = data.get("response", {})
+        if "body" not in result:
+            print(f"[validate] {station_code} — body 없음: {result.get('header', {})}")
+            return False
+        total = result["body"].get("totalCount", 0)
+        return int(total) > 0
+    except Exception as e:
+        print(f"[validate] {station_code} — 오류: {e}")
         return False
 
 
@@ -51,7 +66,7 @@ def fetch_daily_weather(station_code: str, start_date: str, end_date: str) -> li
         chunk_end = min(current + timedelta(days=chunk_days - 1), end)
 
         params = {
-            "serviceKey": KMA_API_KEY,
+            "serviceKey": _get_api_key(),
             "numOfRows":  chunk_days,
             "pageNo":     1,
             "dataType":   "JSON",
