@@ -23,7 +23,7 @@
 | `.docx` | python-docx로 열기, 내용 여부 확인 | Microsoft Word 문서 |
 | `.pptx` | python-pptx로 열기, 슬라이드 수 확인 | Microsoft PowerPoint 프레젠테이션 |
 | `.pdf` | PyMuPDF로 열기, 텍스트량으로 스캔본/텍스트 구분, AIP/DRM 감지 | Adobe Acrobat 문서 (텍스트) / (스캔본) |
-| `.hwp` | OLE2 시그니처 확인 + hwp5txt 텍스트 추출 시도 | 한글 문서 |
+| `.hwp` | 파일 읽기 가능 여부 확인 (HWP 버전별 구조 차이로 인해 내용 검증은 한글 프로그램 필요) | 한글 문서 |
 | `.hwpx` | ZIP 구조 확인 | 한글 문서 |
 | `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.tif` `.tiff` | Pillow로 유효성 확인, 해상도·색상모드 추출 | PNG 이미지 (1920×1080, RGB) |
 | `.dxf` | ezdxf로 파싱(설치 시), 미설치 시 SECTION/ENDSEC 텍스트 시그니처 확인 | AutoCAD DXF 도면 (1,234개 객체) |
@@ -63,7 +63,6 @@
 | `파일 손상 (내용 없음)` | 열리지만 내용이 없음 |
 | `파일 손상 (압축 파일 오류)` | 압축 파일 구조가 손상됨 |
 | `파일 손상 (이미지 오류)` | 이미지 파일 구조 손상 |
-| `파일 손상 (HWP 구조 오류)` | HWP OLE2 시그니처 불일치 |
 | `파일 손상 (DWG 시그니처 오류)` | DWG AC#### 시그니처 없음 |
 | `파일 손상 (DXF 구조 오류)` | DXF SECTION/ENDSEC 구조 없음 |
 | `파일 손상 (XER 구조 오류)` | XER 시그니처 및 XML 구조 없음 |
@@ -129,7 +128,6 @@ pip install openpyxl python-docx python-pptx PyMuPDF py7zr rarfile xlrd tqdm Pil
 #### 선택 설치 (미설치 시 해당 형식은 크기 또는 시그니처만 확인)
 ```bash
 pip install ezdxf     # DXF 객체 수 파싱
-pip install pyhwp     # HWP 텍스트 추출 (hwp5txt 명령어 제공)
 ```
 
 > `.rar` 파일 점검 시 **UnRAR** 실행 파일이 별도로 필요합니다.  
@@ -153,7 +151,7 @@ pip install pyhwp     # HWP 텍스트 추출 (hwp5txt 명령어 제공)
 
 | 형식 | 한계 |
 |------|------|
-| `.hwp` | hwp5txt 미설치 시 OLE2 시그니처 확인만 수행 (내용 검증 불가) |
+| `.hwp` | HWP 버전별 구조가 다양해 파일 읽기 가능 여부만 확인. 내용 검증은 한글 프로그램 필요 |
 | `.doc` `.ppt` `.docm` `.pptm` | 구형 Office 형식 → 크기로만 판단 |
 | `.dwg` | 시그니처(버전 코드) 확인만 가능, 내부 도면 데이터 검증 불가 |
 | 암호 걸린 정상 파일 | 열기 실패로 기록되나 실제로는 정상 파일일 수 있음 |

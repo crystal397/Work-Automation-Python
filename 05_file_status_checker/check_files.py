@@ -10,7 +10,6 @@ import os
 import sys
 import zipfile
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from datetime import datetime
@@ -96,7 +95,7 @@ def try_open_file(filepath: Path) -> tuple:
             # 1차: openpyxl
             try:
                 import openpyxl as ox
-                wb = ox.load_workbook(filepath, read_only=True, data_only=True)
+                wb = ox.load_workbook(_lib_path(filepath), read_only=True, data_only=True)
                 has = any(s.max_row and s.max_row > 0 for s in wb.worksheets)
                 wb.close()
                 return ("", "") if has else ("파일 손상 (내용 없음)", "")
@@ -106,7 +105,7 @@ def try_open_file(filepath: Path) -> tuple:
             # 2차: xlrd (구형 xls)
             try:
                 import xlrd
-                wb = xlrd.open_workbook(filepath)
+                wb = xlrd.open_workbook(_lib_path(filepath))
                 has = any(wb.sheet_by_index(i).nrows > 0 for i in range(wb.nsheets))
                 if has:
                     raw = filepath.read_bytes()
@@ -143,20 +142,20 @@ def try_open_file(filepath: Path) -> tuple:
         # ── Word
         elif ext == ".docx":
             import docx
-            doc = docx.Document(filepath)
+            doc = docx.Document(_lib_path(filepath))
             has = bool(doc.paragraphs or doc.tables)
             return ("", "") if has else ("파일 손상 (내용 없음)", "")
 
         # ── PowerPoint
         elif ext == ".pptx":
             from pptx import Presentation
-            prs = Presentation(filepath)
+            prs = Presentation(_lib_path(filepath))
             return ("", "") if len(prs.slides) > 0 else ("파일 손상 (내용 없음)", "")
 
         # ── PDF
         elif ext == ".pdf":
             import fitz
-            doc = fitz.open(filepath)
+            doc = fitz.open(_lib_path(filepath))
             if doc.page_count == 0:
                 doc.close()
                 return ("파일 손상 (내용 없음)", "")
@@ -178,28 +177,13 @@ def try_open_file(filepath: Path) -> tuple:
 
         # ── 한글 문서
         elif ext in (".hwp", ".hwpx"):
-            if ext == ".hwpx":
-                # hwpx는 ZIP 기반
-                try:
-                    with zipfile.ZipFile(filepath, "r") as z:
-                        return ("", "") if z.namelist() else ("파일 손상 (내용 없음)", "")
-                except zipfile.BadZipFile:
-                    return ("파일 손상 (압축 구조 오류)", "")
-            # hwp는 OLE 기반 — 시그니처 확인 후 hwp5txt 시도
-            raw = filepath.read_bytes()[:8]
-            if raw != b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
-                return ("파일 손상 (HWP 구조 오류)", "")
+            # HWP는 버전마다 내부 구조가 달라 한글 프로그램 없이 손상 여부를 확인하기 어려움
+            # 파일을 읽을 수 있고 빈 파일이 아니면 정상으로 판단 (빈 파일은 앞서 처리됨)
             try:
-                result = subprocess.run(
-                    ["hwp5txt", str(filepath)],
-                    capture_output=True, timeout=15,
-                    encoding="utf-8", errors="replace"
-                )
-                if result.returncode == 0:
-                    return ("", "") if result.stdout.strip() else ("파일 손상 (내용 없음)", "")
-            except FileNotFoundError:
-                pass  # hwp5txt 미설치 → OLE 시그니처 정상이므로 OK
-            return ("", "")
+                filepath.read_bytes()
+                return ("", "")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
 
         # ── 이미지 — Pillow로 유효성 확인 및 해상도 표시
         elif ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"):
@@ -220,7 +204,7 @@ def try_open_file(filepath: Path) -> tuple:
         elif ext == ".dxf":
             try:
                 import ezdxf
-                doc = ezdxf.readfile(str(filepath))
+                doc = ezdxf.readfile(_lib_path(filepath))
                 count = len(list(doc.modelspace()))
                 return ("", f"AutoCAD DXF 도면 ({count:,}개 객체)")
             except ImportError:
@@ -388,6 +372,14 @@ def to_extended_path(p: Path) -> Path:
     if os.name == "nt" and not s.startswith(prefix):
         s = prefix + s
     return Path(s)
+
+
+def _lib_path(p: Path) -> str:
+    r"""라이브러리에 넘길 경로 문자열: \\?\ 접두사 제거 (openpyxl·fitz 등 C 확장 호환)"""
+    s = str(p)
+    if s.startswith("\\\\?\\"):
+        s = s[4:]
+    return s
 
 
 def ext_to_label(ext: str) -> str:
