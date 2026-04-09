@@ -16,6 +16,8 @@ from kma_client import fetch_daily_weather, parse_weather, validate_station
 from storage import init_db, upsert_weather
 from analyzer import summarize
 
+import config as _config
+
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
@@ -51,6 +53,56 @@ def _haversine(lat1, lon1, lat2, lon2) -> float:
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# ── API 키 설정 다이얼로그 ─────────────────────────────────────
+class ApiKeyDialog(ctk.CTkToplevel):
+    """최초 실행 시 또는 API 키가 없을 때 표시되는 설정 창."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("API 키 설정")
+        self.geometry("500x340")
+        self.resizable(False, False)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.saved = False
+
+        ctk.CTkLabel(self, text="기상청 API 키 설정",
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(28, 4))
+        ctk.CTkLabel(
+            self,
+            text="공공데이터포털(data.go.kr)에서 무료로 발급받을 수 있습니다.\n"
+                 "검색어: '기상청_지상(종관, ASOS) 일자료 조회서비스'\n"
+                 "승인 후 '일반 인증키(Decoding)'를 아래에 입력하세요.",
+            justify="left",
+            wraplength=440,
+        ).pack(padx=28, pady=(0, 16))
+
+        ctk.CTkLabel(self, text="API 키", anchor="w").pack(fill="x", padx=28, pady=(0, 4))
+        self.entry = ctk.CTkEntry(self, width=440, placeholder_text="발급받은 키를 여기에 붙여넣기")
+        self.entry.pack(padx=28, pady=(0, 20))
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=28, pady=(0, 20))
+        ctk.CTkButton(btn_row, text="취소", fg_color="gray", hover_color="dimgray",
+                      command=self._on_cancel).pack(side="left", expand=True, fill="x", padx=(0, 8))
+        ctk.CTkButton(btn_row, text="저장 후 시작", command=self._on_save).pack(side="left", expand=True, fill="x")
+
+        self.after(50, self.lift)
+
+    def _on_save(self):
+        key = self.entry.get().strip()
+        if not key:
+            messagebox.showwarning("입력 오류", "API 키를 입력해 주세요.", parent=self)
+            return
+        _config.save_api_key(key)
+        self.saved = True
+        self.destroy()
+
+    def _on_cancel(self):
+        self.saved = False
+        self.destroy()
 
 
 # ── 공종 추가 다이얼로그 ────────────────────────────────────────
@@ -164,6 +216,17 @@ class App(ctk.CTk):
 
         self._build_layout()
         self._show_step(0)
+
+        # API 키 없으면 첫 실행 설정 창 표시
+        if not _config.KMA_API_KEY:
+            self.after(200, self._prompt_api_key)
+
+    def _prompt_api_key(self):
+        dlg = ApiKeyDialog(self)
+        self.wait_window(dlg)
+        if not dlg.saved:
+            messagebox.showinfo("종료", "API 키가 없으면 프로그램을 사용할 수 없습니다.")
+            self.destroy()
 
     # ── 레이아웃 구성 ───────────────────────────────────────────
     def _build_layout(self):
@@ -357,7 +420,10 @@ class App(ctk.CTk):
         candidates = [s for s in ASOS_STATIONS if keyword in s["name"]]
         if not candidates:
             self._clear_results()
-            self.lbl_search_status.configure(text="검색 결과가 없습니다.")
+            self.lbl_search_status.configure(
+                text=f"'{keyword}' 관측소를 찾을 수 없어 현장 좌표 기반으로 추천합니다."
+            )
+            self._show_nearest()
             return
         self._validate_and_show(candidates)
 
