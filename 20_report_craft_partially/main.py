@@ -1240,9 +1240,6 @@ def cmd_interactive():
         print("  │  3. 품질 검증             (단일 프로젝트)       │")
         print("  │  4. 전체 품질 검증        (모든 프로젝트)       │")
         print("  │  ─────────────────────────────────────────────  │")
-        print("  │  5. 레퍼런스 학습         (최초 1회)            │")
-        print("  │  6. 일괄 재스캔           (코드 업데이트 후)    │")
-        print("  │  ─────────────────────────────────────────────  │")
         print("  │  0. 종료                                        │")
         print("  └─────────────────────────────────────────────────┘")
         print()
@@ -1304,24 +1301,6 @@ def cmd_interactive():
             print()
             try:
                 cmd_compare_all()
-            except SystemExit:
-                pass
-            _pause()
-
-        elif choice == "5":
-            # ── learn ─────────────────────────────────────────────
-            print()
-            try:
-                cmd_learn()
-            except SystemExit:
-                pass
-            _pause()
-
-        elif choice == "6":
-            # ── rescan-all ────────────────────────────────────────
-            print()
-            try:
-                cmd_rescan_all()
             except SystemExit:
                 pass
             _pause()
