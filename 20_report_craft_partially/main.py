@@ -1204,14 +1204,145 @@ def cmd_finish(project_name: str | None):
         cmd_generate(project_name)
 
 
+# ── 인터랙티브 메뉴 (더블클릭 실행 시) ─────────────────────────────────────
+
+def _ask(prompt: str, default: str = "") -> str:
+    """사용자 입력을 받는다. 빈 입력이면 default 반환."""
+    suffix = f" [{default}]" if default else ""
+    try:
+        val = input(f"{prompt}{suffix}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return default
+    return val if val else default
+
+
+def _pause():
+    """작업 완료 후 창이 바로 닫히지 않도록 대기한다."""
+    try:
+        input("\n  Enter 를 누르면 메뉴로 돌아갑니다...")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
+def cmd_interactive():
+    """더블클릭 실행 시 진입하는 인터랙티브 메뉴."""
+    while True:
+        _print_header()
+
+        # 마지막 작업 프로젝트 표시
+        last = config.load_current_project()
+        if last:
+            print(f"  마지막 프로젝트: {last}")
+        print()
+        print("  ┌─────────────────────────────────────────────────┐")
+        print("  │  1. 스캔 + 프롬프트 생성  (신규 프로젝트 시작) │")
+        print("  │  2. docx 생성             (JSON 작성 완료 후)  │")
+        print("  │  3. 품질 검증             (단일 프로젝트)       │")
+        print("  │  4. 전체 품질 검증        (모든 프로젝트)       │")
+        print("  │  ─────────────────────────────────────────────  │")
+        print("  │  5. 레퍼런스 학습         (최초 1회)            │")
+        print("  │  6. 일괄 재스캔           (코드 업데이트 후)    │")
+        print("  │  ─────────────────────────────────────────────  │")
+        print("  │  0. 종료                                        │")
+        print("  └─────────────────────────────────────────────────┘")
+        print()
+
+        choice = _ask("  번호 선택").strip()
+
+        if choice == "0":
+            print("\n  종료합니다.")
+            break
+
+        elif choice == "1":
+            # ── scanprepare ───────────────────────────────────────
+            print()
+            print("  수신자료 폴더 경로를 입력하세요.")
+            print("  (여러 경로는 세미콜론(;)으로 구분)")
+            path_str = _ask("  경로")
+            if not path_str:
+                print("  [취소] 경로가 입력되지 않았습니다.")
+                _pause()
+                continue
+
+            project = _ask("  프로젝트명 (엔터 = 자동 감지)")
+            raw: list[str] = [p.strip().strip('"').strip("'")
+                               for p in path_str.split(";") if p.strip()]
+            scan_args = raw[:]
+            if project:
+                scan_args += ["--project", project]
+            print()
+            try:
+                cmd_scan_prepare(scan_args)
+            except SystemExit:
+                pass
+            _pause()
+
+        elif choice == "2":
+            # ── finish ────────────────────────────────────────────
+            print()
+            project = _ask("  프로젝트명 (엔터 = 마지막 프로젝트)", last or "")
+            print()
+            try:
+                cmd_finish(project or None)
+            except SystemExit:
+                pass
+            _pause()
+
+        elif choice == "3":
+            # ── compare ───────────────────────────────────────────
+            print()
+            project = _ask("  프로젝트명 (엔터 = 마지막 프로젝트)", last or "")
+            print()
+            try:
+                cmd_compare(project or None)
+            except SystemExit:
+                pass
+            _pause()
+
+        elif choice == "4":
+            # ── compare-all ───────────────────────────────────────
+            print()
+            try:
+                cmd_compare_all()
+            except SystemExit:
+                pass
+            _pause()
+
+        elif choice == "5":
+            # ── learn ─────────────────────────────────────────────
+            print()
+            try:
+                cmd_learn()
+            except SystemExit:
+                pass
+            _pause()
+
+        elif choice == "6":
+            # ── rescan-all ────────────────────────────────────────
+            print()
+            try:
+                cmd_rescan_all()
+            except SystemExit:
+                pass
+            _pause()
+
+        else:
+            print(f"\n  '{choice}' 는 유효하지 않은 선택입니다.")
+            _pause()
+
+
 # ── CLI 파싱 ─────────────────────────────────────────────────────────────────
 
 def main():
     args = sys.argv[1:]
 
     if not args:
-        print(__doc__)
-        sys.exit(0)
+        # 인수 없이 실행 — 인터랙티브 메뉴 (더블클릭 포함)
+        try:
+            cmd_interactive()
+        except (KeyboardInterrupt, EOFError):
+            print("\n  종료합니다.")
+        return
 
     cmd = args[0].lower()
 
