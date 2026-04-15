@@ -7,6 +7,8 @@
     python main.py prepare [프로젝트명]                      # Step 3: claude.ai용 프롬프트 조립
     python main.py validate [프로젝트명]                     # Step 3.5: JSON 사전 검증 (generate 전 오류 확인)
     python main.py generate [프로젝트명]                     # Step 4: JSON → docx 생성
+    python main.py compare  [프로젝트명]                     # Step 5: output vs reference 품질 비교
+    python main.py compare-all                               # Step 5: 전체 프로젝트 일괄 비교
 
 콤보 명령 (단계 합산):
     python main.py scanprepare <공문폴더경로> [--project <이름>]  # scan + prepare 한 번에
@@ -126,6 +128,17 @@ def _token_overlap_score(a: str, b: str) -> float:
     if not ta or not tb:
         return 0.0
     common = ta & tb
+    # 복합어 내 부분문자열 일치: 3자 이상 토큰이 상대 토큰에 포함되면 추가 인정
+    # (예: "양산선1공구" ∈ "부산도시철도양산선1공구현장", "군부대" ∈ "원주군부대")
+    for ta_tok in ta:
+        if len(ta_tok) < 3:
+            continue
+        for tb_tok in tb:
+            if len(tb_tok) < 3 or ta_tok == tb_tok:
+                continue
+            if ta_tok in tb_tok or tb_tok in ta_tok:
+                shorter = ta_tok if len(ta_tok) <= len(tb_tok) else tb_tok
+                common.add(shorter)
     return len(common) / min(len(ta), len(tb))
 
 
@@ -653,6 +666,381 @@ def cmd_validate(project_name: str | None, _stop_on_error: bool = True) -> bool:
     return False
 
 
+# ── compare: output vs reference 품질 검증 ──────────────────────────────────
+
+def _find_reference_file(project_dir: Path) -> "Path | None":
+    """output 폴더명과 퍼지 매칭으로 reference 파일을 찾는다."""
+    ref_dir = config.REFERENCE_DIR
+    if not ref_dir.exists():
+        return None
+    ref_files = (
+        sorted(ref_dir.glob("*.docx")) + sorted(ref_dir.glob("*.DOCX"))
+        + sorted(ref_dir.glob("*.pdf")) + sorted(ref_dir.glob("*.PDF"))
+    )
+    ref_files = [
+        f for f in ref_files
+        if not any(kw in f.name for kw in ["템플릿", "비용산정기준", "template", "Template"])
+    ]
+    best_score, best_ref = 0.0, None
+    for rf in ref_files:
+        s = _token_overlap_score(project_dir.name, rf.stem)
+        if s > best_score:
+            best_score, best_ref = s, rf
+    return best_ref if best_score >= 0.35 else None
+
+
+def _extract_text_from_docx(path: Path) -> str:
+    """docx에서 전체 텍스트를 추출한다. 실패 시 빈 문자열."""
+    try:
+        from docx import Document as _Document
+        doc = _Document(str(path))
+        lines = []
+        for para in doc.paragraphs:
+            if para.text.strip():
+                lines.append(para.text.strip())
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    if cell.text.strip():
+                        lines.append(cell.text.strip())
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def _extract_text_from_pdf(path: Path) -> str:
+    """pdf에서 텍스트를 추출한다. 실패 시 빈 문자열."""
+    try:
+        import pdfminer.high_level as _pml
+        import io as _io2
+        buf = _io2.StringIO()
+        with open(path, "rb") as fh:
+            _pml.extract_text_to_fp(fh, buf, output_type="text")
+        return buf.getvalue()
+    except Exception:
+        return ""
+
+
+def _extract_ref_text(ref_path: Path) -> str:
+    """reference 파일에서 텍스트를 추출한다."""
+    if ref_path.suffix.lower() == ".pdf":
+        return _extract_text_from_pdf(ref_path)
+    return _extract_text_from_docx(ref_path)
+
+
+def _extract_ref_tables(ref_path: Path) -> list[list[list[str]]]:
+    """reference docx에서 표를 추출한다. [{행: [셀, ...]}]"""
+    if ref_path.suffix.lower() != ".docx":
+        return []
+    try:
+        from docx import Document as _Document
+        doc = _Document(str(ref_path))
+        result = []
+        for table in doc.tables:
+            rows = []
+            for row in table.rows:
+                rows.append([cell.text.strip() for cell in row.cells])
+            result.append(rows)
+        return result
+    except Exception:
+        return []
+
+
+def _find_accountability_table_in_ref(tables: list[list[list[str]]]) -> "list[list[str]] | None":
+    """
+    reference 표 목록에서 귀책사유 도식 요약 표를 찾는다.
+    reference에는 공문현황 상세표(items)와 귀책사유 도식표 두 개가 있을 수 있다.
+    귀책사유 도식표는 상세표보다 뒤에 등장하고 행 수가 더 적으므로 마지막 매칭 표를 반환한다.
+
+    제외 기준 (법령 조문 인용 표):
+    - 데이터 행 첫 번째 셀이 "1)", "가.", "나." 등 법령 열거 번호 패턴으로 시작하면 제외.
+    - 이런 표는 지방계약법/공사계약일반조건 조문을 나열하는 표이며 귀책 도식표가 아님.
+    """
+    import re as _re
+    kws = {"공기지연 사유", "공기지연사유", "비용부담자", "비용부담", "관련 근거", "관련근거",
+           "귀책", "지연일수", "귀책사유"}
+    # 법령 조문 열거 패턴: "1)", "2)", "가.", "나.", "①", "②" 등으로 시작하는 셀
+    _LAW_PAT = _re.compile(r"^(?:[0-9]+\)|[가-힣]\.|[①-⑳]|제\s*[0-9]+)")
+
+    matched: list[list[list[str]]] = []
+    for table in tables:
+        if not table or len(table[0]) < 2:  # 1컬럼 표는 법령 인용 박스 → 제외
+            continue
+        # 헤더 행에 귀책 관련 키워드가 있는지 확인
+        header_text = " ".join(cell.replace(" ", "") for cell in table[0])
+        if not any(kw.replace(" ", "") in header_text for kw in kws):
+            continue
+        # 데이터 행(두 번째 행 이후)이 법령 조문 열거면 제외
+        data_rows = table[1:] if len(table) > 1 else []
+        if data_rows:
+            first_cell = data_rows[0][0].strip() if data_rows[0] else ""
+            if _LAW_PAT.match(first_cell):
+                continue  # 법령 조문 인용 표 → 건너뜀
+        matched.append(table)
+
+    if not matched:
+        return None
+    # 여러 표가 매칭된 경우: 마지막 표가 귀책사유 도식 요약 표
+    return matched[-1]
+
+
+def _find_delay_days_in_text(text: str) -> "list[int]":
+    """텍스트에서 'N일' 패턴 숫자를 추출한다 (3자리 이상만)."""
+    import re as _re
+    # "159일", "387일" 등 100 이상 숫자
+    hits = [int(m) for m in _re.findall(r"\b([1-9]\d{2,})\s*일\b", text)]
+    return hits
+
+
+def _check_item(label: str, passed: bool, detail: str = "") -> tuple[str, bool, str]:
+    return (label, passed, detail)
+
+
+def _compare_one(project_dir: Path, ref_path: Path) -> dict:
+    """
+    단일 프로젝트의 data.json과 reference를 비교하여 체크 결과를 반환한다.
+    반환: {checks: [(label, ok, detail)], score: (ok, total), ref_name: str}
+    """
+    import re as _re
+
+    checks: list[tuple[str, bool, str]] = []
+
+    # ── data.json 로드 ──
+    import glob as _glob
+    candidates = _glob.glob(str(project_dir / "*data.json"))
+    if not candidates:
+        return {"error": "data.json 없음", "ref_name": ref_path.name}
+    with open(candidates[0], encoding="utf-8") as f:
+        data = json.load(f)
+
+    # ── reference 텍스트·표 추출 ──
+    ref_text = _extract_ref_text(ref_path)
+    ref_tables = _extract_ref_tables(ref_path)
+    ref_acc_table = _find_accountability_table_in_ref(ref_tables)
+
+    total_dd = data.get("total_delay_days")
+
+    # CHECK 1: total_delay_days가 reference 텍스트에 등장하는지
+    if total_dd:
+        pattern = str(total_dd) + r"\s*일"
+        found_in_ref = bool(_re.search(pattern, ref_text))
+        checks.append(_check_item(
+            f"total_delay_days({total_dd}일) — reference에 등장",
+            found_in_ref,
+            "" if found_in_ref else f"reference 텍스트에서 '{total_dd}일' 미발견"
+        ))
+    else:
+        checks.append(_check_item("total_delay_days 설정 여부", False, "data.json에 total_delay_days 없음"))
+
+    # CHECK 2: accountability_diagram delay_days 합 = total_delay_days
+    diag = data.get("accountability_diagram", [])
+    diag_sum = sum(r.get("delay_days", 0) for r in diag if isinstance(r, dict))
+    checks.append(_check_item(
+        f"귀책 도식표 합계({diag_sum}일) = total_delay_days({total_dd}일)",
+        diag_sum == total_dd,
+        "" if diag_sum == total_dd else f"불일치: 합계 {diag_sum} ≠ {total_dd}"
+    ))
+
+    # CHECK 3: accountability_diagram 행 수 vs reference 귀책 표 행 수
+    diag_rows = len([r for r in diag if isinstance(r, dict)])
+    if ref_acc_table:
+        # 첫 행을 헤더로 간주, 합계/소계 행 제외
+        sum_kws = {"합계", "소계", "계", "total", "sum"}
+        data_rows_ref = [
+            r for r in ref_acc_table[1:]  # 첫 행(헤더) 제외
+            if not any(cell.strip() in sum_kws or cell.strip().lower() in sum_kws
+                       for cell in r)
+        ]
+        ref_row_count = len(data_rows_ref)
+        match = (diag_rows == ref_row_count)
+        checks.append(_check_item(
+            f"귀책 도식표 데이터 행 수(output {diag_rows}행 vs reference {ref_row_count}행)",
+            match,
+            "" if match else f"output {diag_rows}행 ≠ reference {ref_row_count}행"
+        ))
+    else:
+        checks.append(_check_item(
+            "귀책 도식표 행 수 비교",
+            None,  # type: ignore
+            "reference에서 귀책 표를 찾지 못함 (수동 확인 필요)"
+        ))
+
+    # CHECK 4: reference 귀책 표 컬럼 수
+    if ref_acc_table and ref_acc_table[0]:
+        ref_col_count = len(ref_acc_table[0])
+        # 5컬럼(국가계약) or 3컬럼(지방계약) 중 어느 쪽인지
+        expected = 3 if ref_col_count == 3 else (5 if ref_col_count == 5 else ref_col_count)
+        checks.append(_check_item(
+            f"귀책 표 컬럼 수 ({ref_col_count}컬럼)",
+            True,
+            f"reference 기준 {ref_col_count}컬럼"
+        ))
+    else:
+        checks.append(_check_item("귀책 표 컬럼 수", None, "reference 귀책 표 미발견"))  # type: ignore
+
+    # CHECK 5: 필수 섹션 존재 여부 (data.json 기준)
+    req_fields = {
+        "background_paragraphs": "배경 단락",
+        "pre_diagram_paragraphs": "도식표 전 단락",
+        "conclusion_paragraphs": "결론 단락",
+        "summary": "종합 요약",
+    }
+    for field, label in req_fields.items():
+        val = data.get(field)
+        ok = bool(val) and (len(val) >= 1 if isinstance(val, list) else len(str(val)) > 10)
+        checks.append(_check_item(f"필수 섹션 — {label}", ok, "" if ok else f"'{field}' 비어 있음"))
+
+    # CHECK 6: responsible_party 비표준값 감지 (줄바꿈·괄호 내용 제거 후 판단)
+    _STD_RP = {"발주처", "발주자", "도급인", "시공사", "수급인", "공동귀책", ""}
+    def _normalize_rp(v: str) -> str:
+        import re as _re2
+        v = v.replace("\n", "").strip()
+        # 괄호 포함 값에서 기본 키워드만 추출: "발주처(한국가스공사)" → "발주처"
+        m = _re2.match(r"^(발주처|발주자|시공사|수급인|공동귀책)", v)
+        return m.group(1) if m else v
+    non_std = [
+        r.get("responsible_party", "") for r in diag
+        if isinstance(r, dict) and _normalize_rp(r.get("responsible_party", "")) not in _STD_RP
+    ]
+    checks.append(_check_item(
+        "responsible_party 표준값 사용 여부",
+        len(non_std) == 0,
+        "" if not non_std else f"비표준값: {non_std[:3]}"
+    ))
+
+    # CHECK 7: items에 delay_days 또는 causal_description이 채워져 있는지
+    items = data.get("items", [])
+    empty_items = [
+        i.get("no", idx + 1) for idx, i in enumerate(items)
+        if isinstance(i, dict) and not (i.get("causal_description") or i.get("subject"))
+    ]
+    checks.append(_check_item(
+        "items 내용 충실도 (causal_description/subject 채워짐)",
+        len(empty_items) == 0,
+        "" if not empty_items else f"비어있는 항목 no: {empty_items[:5]}"
+    ))
+
+    ok_count = sum(1 for _, ok, _ in checks if ok is True)
+    total_count = sum(1 for _, ok, _ in checks if ok is not None)
+
+    return {
+        "checks": checks,
+        "score": (ok_count, total_count),
+        "ref_name": ref_path.name,
+    }
+
+
+def _print_compare_result(project_name: str, result: dict):
+    """비교 결과를 콘솔에 출력한다."""
+    print(f"\n[{project_name}]")
+    if "error" in result:
+        print(f"  ❌ {result['error']}")
+        return
+
+    print(f"  참조: reference/{result['ref_name']}")
+    for label, ok, detail in result["checks"]:
+        if ok is True:
+            icon = "✅"
+        elif ok is False:
+            icon = "❌"
+        else:
+            icon = "⚠️ "
+        line = f"  {icon} {label}"
+        if detail:
+            line += f"\n       → {detail}"
+        print(line)
+
+    ok_n, total_n = result["score"]
+    pct = int(ok_n / total_n * 100) if total_n else 0
+    print(f"  점수: {ok_n}/{total_n} ({pct}%)")
+
+
+def cmd_compare(project_name: str | None):
+    """단일 프로젝트 output vs reference 품질 비교."""
+    _print_header()
+    print("\n[품질 검증] output vs reference 비교")
+    print("─" * 60)
+
+    project_name, project_dir = _resolve_project_dir(project_name)
+    ref_path = _find_reference_file(project_dir)
+
+    if not ref_path:
+        print(f"\n[오류] '{project_name}' 에 매칭되는 reference 파일을 찾지 못했습니다.")
+        print("  reference/ 폴더에 해당 프로젝트의 완성본 보고서가 있는지 확인하세요.")
+        sys.exit(1)
+
+    result = _compare_one(project_dir, ref_path)
+    _print_compare_result(project_name, result)
+    print()
+
+
+def cmd_compare_all():
+    """전체 프로젝트 output vs reference 품질 비교 (일괄)."""
+    _print_header()
+    print("\n[품질 검증 — 전체] output 14개 vs reference 대조")
+    print("─" * 60)
+
+    out_dir = config.OUTPUT_DIR
+    if not out_dir.exists():
+        print("[오류] output/ 폴더가 없습니다.")
+        sys.exit(1)
+
+    project_dirs = sorted([d for d in out_dir.iterdir() if d.is_dir()])
+    if not project_dirs:
+        print("[오류] output/ 아래 프로젝트 폴더가 없습니다.")
+        sys.exit(1)
+
+    summary_rows: list[tuple[str, int, int, list[str]]] = []  # name, ok, total, failures
+
+    for pd in project_dirs:
+        ref_path = _find_reference_file(pd)
+        if not ref_path:
+            print(f"\n  ⚠️  [{pd.name}] reference 매칭 없음 — 건너뜀")
+            continue
+
+        result = _compare_one(pd, ref_path)
+        _print_compare_result(pd.name, result)
+
+        ok_n, total_n = result.get("score", (0, 0))
+        failures = [label for label, ok, _ in result.get("checks", []) if ok is False]
+        summary_rows.append((pd.name, ok_n, total_n, failures))
+
+    # ── 전체 요약 ──
+    print("\n" + "=" * 60)
+    print("  전체 요약")
+    print("=" * 60)
+    print(f"  {'프로젝트':<40} {'점수':>8}  {'판정'}")
+    print("  " + "-" * 55)
+    for name, ok_n, total_n, failures in summary_rows:
+        pct = int(ok_n / total_n * 100) if total_n else 0
+        verdict = "✅" if pct == 100 else ("⚠️ " if pct >= 70 else "❌")
+        short = name[:38]
+        print(f"  {short:<40} {ok_n}/{total_n} ({pct:>3}%)  {verdict}")
+
+    # ── 반복 실패 패턴 ──
+    from collections import Counter as _Counter
+    all_failures = [f for _, _, _, fs in summary_rows for f in fs]
+    if all_failures:
+        print()
+        print("  반복 실패 항목 (2개 이상 프로젝트):")
+        for label, cnt in _Counter(all_failures).most_common():
+            if cnt >= 2:
+                print(f"    [{cnt}회] {label}")
+    print("─" * 60)
+
+    # ── 결과 파일 저장 ──
+    result_path = out_dir / "compare_result.txt"
+    # (stdout 캡처 없이 간단히 요약만 저장)
+    lines = ["output vs reference 품질 검증 결과\n"]
+    for name, ok_n, total_n, failures in summary_rows:
+        pct = int(ok_n / total_n * 100) if total_n else 0
+        lines.append(f"{name}: {ok_n}/{total_n} ({pct}%)")
+        for f in failures:
+            lines.append(f"  ❌ {f}")
+    result_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\n  결과 저장: {result_path}")
+
+
 # ── 콤보 명령 ────────────────────────────────────────────────────────────────
 
 def cmd_scan_prepare(raw_args: list[str]):
@@ -707,9 +1095,16 @@ def main():
         project_name = args[1] if len(args) > 1 else None
         cmd_finish(project_name)
 
+    elif cmd == "compare":
+        project_name = args[1] if len(args) > 1 else None
+        cmd_compare(project_name)
+
+    elif cmd in ("compare-all", "compareall", "ca"):
+        cmd_compare_all()
+
     else:
         print(f"알 수 없는 명령: {cmd}")
-        print("사용 가능한 명령: learn | scan | prepare | validate | generate")
+        print("사용 가능한 명령: learn | scan | prepare | validate | generate | compare | compare-all")
         print("콤보 명령:        scanprepare (scan+prepare)  |  finish (validate+generate)")
         sys.exit(1)
 
