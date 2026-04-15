@@ -18,7 +18,7 @@ from pathlib import Path
 #     이전 버전:       exe 옆 = sys.executable.parent
 if getattr(sys, "frozen", False):
     BASE_DIR   = Path(sys.executable).parent
-    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", sys.executable)).parent
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))  # _internal/ 자체를 가리킴
 else:
     BASE_DIR   = Path(__file__).parent
     BUNDLE_DIR = BASE_DIR
