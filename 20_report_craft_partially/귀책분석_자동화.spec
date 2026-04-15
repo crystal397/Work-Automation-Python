@@ -19,6 +19,7 @@
     - Tesseract-OCR/는 선택 사항 (없으면 C:\\Program Files\\Tesseract-OCR\\ 자동 탐색)
 """
 
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 block_cipher = None
