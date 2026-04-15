@@ -50,11 +50,23 @@ pip install pandas openpyxl python-dotenv requests
 ### 환경변수 설정 (`.env`)
 
 ```env
+# 루트 .env (공통)
 MOLIT_SERVICE_KEY=국토부_API_키
 JUSO_API_KEY=행안부_도로명주소_API_키
 KAKAO_API_KEY=카카오_API_키
 KMA_API_KEY=기상청_API_키
+VWORLD_API_KEY=브이월드_API_키
+
+# 12_manhour_aggregation/.env
+PDF_ROOT=노무비자료_폴더_경로
+
+# 18_report_craft/.env
+REPORT_AUTHOR=보고서_작성_회사명
+REPORT_INPUT_DIR=수신자료_폴더_경로   # 선택, 기본값: input/
+REPORT_OUTPUT_DIR=결과물_폴더_경로    # 선택, 기본값: output/
 ```
+
+각 폴더의 `.env.example`을 참고해 설정하세요.
 
 ---
 
@@ -252,7 +264,7 @@ python pdf_invoice_extractor_and_excel_filler.py
 - SQLite 저장
 
 ```bash
-python collector.py    # 전체 기간 수집 (config.py의 SITES.start ~ end 기준)
+python collector.py    # 전체 기간 수집 (sites.json의 start ~ end 기준)
 python analyzer.py     # 공종별 작업불가일 산정 및 엑셀 출력
 python scheduler.py    # 매일 6시 자동 수집 데몬 실행
 ```
@@ -325,44 +337,6 @@ pyinstaller hwp_renumber.spec   # → dist\hwp_renumber.exe
 
 ---
 
-### 20. 귀책분석 파트 자동 생성
-
-공문·변경계약서 등 수신자료를 스캔하여 건설공사 분쟁 보고서의 **귀책분석 파트** 초안을 자동 생성.
-
-- **3-Pass 공문 필터링**: 폴더명 분류 → 공문 여부 확인 → 프로젝트 관련성 검사
-- **멀티포맷 추출**: docx / pdf / hwp / 이미지(OCR)
-- **패턴 기반 생성**: `귀책분석_패턴집.md`의 규칙을 적용하여 표·서술 작성
-- **docx 출력**: `02_귀책분석_[프로젝트명]_[날짜].docx`
-- 금액·비용 관련 내용은 분석 제외, 귀책분석 파트만 처리
-
-```bash
-python main.py          # 단일 프로젝트 처리
-python batch_rescan.py  # 여러 프로젝트 일괄 재스캔
-python analyze_reports.py  # 완성본 ↔ 초안 대조 분석
-```
-
-**의존성**: python-docx, pdfminer.six, PyMuPDF, pytesseract
-
----
-
-### 21. 건설·부동산 관련 웹 크롤링 도구
-
-건설협회·감정평가 관련 사이트 크롤링 및 공시지가 조회 도구 모음.
-
-- `cak_crawler.py`: 대한건설협회 건설업체 정보 수집
-- `kosca_crawler.py`: 한국건설감정원 데이터 수집
-- `land_price_lookup.py`: V-World API 기반 공시지가 일괄 조회
-- `csv_to_xlsx.py`: 수집 결과 CSV → Excel 변환
-
-```bash
-python cak_crawler.py       # 건설협회 업체 정보 수집
-python land_price_lookup.py # 공시지가 조회
-```
-
-**API**: V-World 공간정보 오픈플랫폼
-
----
-
 ### 18. 공기연장 간접비 보고서 자동 생성
 
 수신자료(PDF·Excel·HWP·HTML·XML·TIF 등)를 넣으면 공기연장 간접비 산정 보고서(.docx)를 자동으로 생성.
@@ -391,6 +365,44 @@ python main.py generate
 **출력**: `output/보고서_초안.md` + `output/보고서_초안.docx`
 
 **의존성**: pdfplumber, PyMuPDF, openpyxl, pandas, pytesseract, python-docx, pywin32, tqdm
+
+---
+
+### 20. 귀책분석 파트 자동 생성
+
+공문·변경계약서 등 수신자료를 스캔하여 건설공사 분쟁 보고서의 **귀책분석 파트** 초안을 자동 생성.
+
+- **3-Pass 공문 필터링**: 폴더명 분류 → 공문 여부 확인 → 프로젝트 관련성 검사
+- **멀티포맷 추출**: docx / pdf / hwp / 이미지(OCR)
+- **패턴 기반 생성**: `귀책분석_패턴집.md`의 규칙을 적용하여 표·서술 작성
+- **docx 출력**: `02_귀책분석_[프로젝트명]_[날짜].docx`
+- 금액·비용 관련 내용은 분석 제외, 귀책분석 파트만 처리
+
+```bash
+python main.py             # 단일 프로젝트 처리
+python batch_rescan.py     # 여러 프로젝트 일괄 재스캔
+python analyze_reports.py  # 완성본 ↔ 초안 대조 분석
+```
+
+**의존성**: python-docx, pdfminer.six, PyMuPDF, pytesseract
+
+---
+
+### 21. 건설·부동산 관련 웹 크롤링 도구
+
+건설협회·감정평가 관련 사이트 크롤링 및 공시지가 조회 도구 모음.
+
+- `cak_crawler.py`: 대한건설협회 건설업체 정보 수집
+- `kosca_crawler.py`: 한국건설감정원 데이터 수집
+- `land_price_lookup.py`: V-World API 기반 공시지가 일괄 조회
+- `csv_to_xlsx.py`: 수집 결과 CSV → Excel 변환
+
+```bash
+python cak_crawler.py       # 건설협회 업체 정보 수집
+python land_price_lookup.py # 공시지가 조회
+```
+
+**API**: V-World 공간정보 오픈플랫폼
 
 ---
 
@@ -439,5 +451,7 @@ python main.py generate
 - **Windows 전용 모듈**: `01`, `03`, `04`, `11`, `18`은 pywin32 COM API 사용 (Windows만 동작)
 - **장경로 지원**: `05`는 Windows 260자 경로 제한을 UNC 경로(`\\?\`)로 우회
 - **API 일일 한도**: `08`은 국토부 API 일일 10,000건 한도를 유형별로 자동 관리
-- **Tesseract**: `09`, `18` OCR 기능 사용 시 Tesseract 및 한국어 언어팩(`kor`) 별도 설치 필요
+- **Tesseract**: `09`, `18`, `20` OCR 기능 사용 시 Tesseract 및 한국어 언어팩(`kor`) 별도 설치 필요
 - **Claude Code 연동**: `18`은 Anthropic API 미사용 — Claude Code CLI가 직접 파일을 읽고 분석
+- **현장 정보 보안**: `10`은 현장명·위경도를 `sites.json`으로 분리 관리 (git 비공개)
+- **V-World API**: `21`의 공시지가 조회 기능 사용 시 V-World API 키 필요 (vworld.kr 발급)
