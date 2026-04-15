@@ -274,10 +274,13 @@ def build(output_dir: Path, project_name: str = "") -> Path:
         if not p.exists():
             missing.append(p.name)
     if missing:
-        raise FileNotFoundError(
-            f"필요한 파일이 없습니다: {', '.join(missing)}\n"
-            "먼저 `python main.py learn` 및 `python main.py scan <경로>` 를 실행하세요."
-        )
+        msgs = [f"필요한 파일이 없습니다: {', '.join(missing)}"]
+        if "reference_patterns.md" in missing:
+            msgs.append("reference_patterns.md 가 output/ 폴더에 없습니다.")
+            msgs.append("배포 패키지에 이 파일이 포함되어 있는지 확인하세요.")
+        if any(f in missing for f in ("correspondence_texts.md", "scan_result.json")):
+            msgs.append("스캔이 완료되지 않았습니다. 먼저 [1] 스캔을 실행하세요.")
+        raise FileNotFoundError("\n".join(msgs))
 
     ref_text  = ref_pattern_path.read_text(encoding="utf-8")
     corr_text = corr_texts_path.read_text(encoding="utf-8")
