@@ -1355,11 +1355,15 @@ def main():
     args = sys.argv[1:]
 
     if not args:
-        # 인수 없이 실행 — 인터랙티브 메뉴 (더블클릭 포함)
+        # 인수 없이 실행 — GUI (더블클릭 포함), 실패 시 콘솔 메뉴 폴백
         try:
-            cmd_interactive()
-        except (KeyboardInterrupt, EOFError):
-            print("\n  종료합니다.")
+            from gui import run_gui
+            run_gui()
+        except Exception:
+            try:
+                cmd_interactive()
+            except (KeyboardInterrupt, EOFError):
+                print("\n  종료합니다.")
         return
 
     cmd = args[0].lower()
