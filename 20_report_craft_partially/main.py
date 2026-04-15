@@ -1,47 +1,56 @@
 """
 귀책분석 자동화 시스템 — 진입점
 
-사용법:
-    python main.py learn                                    # Step 1: reference 보고서 학습
-    python main.py scan   <공문폴더경로> [--project <이름>]  # Step 2: 업체 공문 스캔
-    python main.py prepare [프로젝트명]                      # Step 3: claude.ai용 프롬프트 조립
-    python main.py validate [프로젝트명]                     # Step 3.5: JSON 사전 검증 (generate 전 오류 확인)
-    python main.py generate [프로젝트명]                     # Step 4: JSON → docx 생성
-    python main.py compare  [프로젝트명]                     # Step 5: output vs reference 품질 비교
-    python main.py compare-all                               # Step 5: 전체 프로젝트 일괄 비교
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  워크플로우 (신규 프로젝트 추가 시)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-콤보 명령 (단계 합산):
-    python main.py scanprepare <공문폴더경로> [--project <이름>]  # scan + prepare 한 번에
-    python main.py finish [프로젝트명]                            # validate 후 오류 없으면 generate 자동 실행
+  STEP 1 — 공문 스캔
+    python main.py scan "C:\\...\\수신자료" [--project <이름>]
+      → scan_summary.md   : 스캔 결과 요약 (검토·편집 대상)
+      → scan_borderline.md: 관련 여부 판단이 필요한 경계선 공문 목록
+      → scan_result.json  : 공문 목록 (직접 편집 가능)
+      → correspondence_texts.md: 공문 원문 텍스트
 
-워크플로우:
-  1. python main.py learn
-     → output/reference_patterns.md 생성 (reference 보고서 귀책분석 패턴)
+  STEP 2 — 프롬프트 생성
+    python main.py prepare [프로젝트명]
+      → prompt_for_claude.md: Claude Code에 전달할 귀책분석 작성 지시서
 
-  2. python main.py scan "C:\\Users\\...\\수신자료"
-     → output/<프로젝트명>/scan_summary.md
-     → output/<프로젝트명>/scan_result.json
-     → output/<프로젝트명>/correspondence_texts.md
-     ※ 프로젝트명은 스캔 경로의 폴더명에서 자동 생성.
-        직접 지정하려면 --project <이름> 옵션 사용.
-     ※ scan_result.json 을 열어 관련 없는 항목 삭제/추가
+  STEP 3 — Claude Code가 귀책분석 JSON 작성
+    Claude Code가 prompt_for_claude.md 를 읽고
+    output/<프로젝트명>/귀책분석_data.json 을 직접 저장.
 
-  3. python main.py prepare [프로젝트명]
-     → output/<프로젝트명>/prompt_for_claude.md
-     → output/<프로젝트명>/귀책분석_schema.json
-     ※ 프로젝트명 생략 시 마지막 scan 의 프로젝트 자동 사용
+  STEP 4 — 사전 검증
+    python main.py validate [프로젝트명]
+      → 스키마 오류·소결 누락·delay_days 불일치 등을 generate 전에 점검
+      → 오류 발견 시 Claude에게 전달할 수정 요청 블록 자동 출력
 
-  3.5 (Claude가 JSON 저장 후) python main.py validate [프로젝트명]
-     → 귀책분석_data.json 의 스키마 오류 + 소결 누락 + delay_days 누락 등을 사전 점검
-     → 오류 발견 시 "Claude에게 전달할 수정 요청" 블록을 자동 출력
-     ※ generate 실행 전에 validate 로 오류를 확인하면 재작업 횟수를 줄일 수 있습니다.
+  STEP 5 — docx 생성
+    python main.py generate [프로젝트명]
+      → 02_귀책분석_[프로젝트명]_[날짜].docx
 
-  4. python main.py generate [프로젝트명]
-     → output/<프로젝트명>/02_귀책분석_[프로젝트명]_[날짜].docx
-     ※ 프로젝트명 생략 시 마지막 scan 의 프로젝트 자동 사용
+  STEP 6 — 품질 검증
+    python main.py compare [프로젝트명]   # 단일 프로젝트
+    python main.py compare-all            # 전체 일괄
 
---project 옵션:
-    scan 단계에서만 사용하며, 자동 생성된 폴더명 대신 원하는 이름을 지정한다.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  전체 명령 목록
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  python main.py learn                                     # reference 보고서 패턴 학습
+  python main.py scan   <공문폴더경로> [--project <이름>]  # 공문 스캔
+  python main.py prepare [프로젝트명]                      # Claude 지시서 생성
+  python main.py validate [프로젝트명]                     # JSON 사전 검증
+  python main.py generate [프로젝트명]                     # docx 생성
+  python main.py compare  [프로젝트명]                     # 단일 품질 비교
+  python main.py compare-all                               # 전체 품질 비교
+  python main.py rescan-all                                # 전체 프로젝트 일괄 재스캔+재prepare
+
+콤보 명령:
+  python main.py scanprepare <공문폴더경로> [--project <이름>]  # scan + prepare
+  python main.py finish [프로젝트명]                            # validate + generate
+
+  --project 옵션: scan 단계에서 폴더명 대신 원하는 프로젝트명 지정
     예) python main.py scan "C:\\...\\수신자료" --project 인덕원5공구
 """
 
@@ -1061,6 +1070,113 @@ def cmd_compare_all():
     print(f"\n  결과 저장: {result_path}")
 
 
+# ── 유틸리티: rescan-all ─────────────────────────────────────────────────────
+
+def cmd_rescan_all():
+    """
+    전체 프로젝트 일괄 재스캔 + 재prepare.
+
+    - scan_result.json 백업 (scan_result_backup.json, 없는 경우만)
+    - 새 코드로 재스캔 (캐시 재사용, OCR 없음)
+    - scan_result.json 이 없는 폴더는 건너뜀
+    - 이전 scan_result.json vs 새 결과 비교 → 신규 발견 항목 리포트
+    """
+    import shutil
+    import subprocess
+
+    _print_header()
+    print("\n[일괄 재스캔 + 재prepare]")
+    print("─" * 60)
+
+    out_dir = config.OUTPUT_DIR
+    if not out_dir.exists():
+        print("[오류] output/ 폴더가 없습니다.")
+        sys.exit(1)
+
+    python = sys.executable
+
+    def _run(cmd: list[str]) -> tuple[int, str]:
+        res = subprocess.run(
+            cmd,
+            cwd=str(Path(__file__).parent),
+            capture_output=True, encoding="utf-8", errors="replace",
+        )
+        return res.returncode, (res.stdout or "") + (res.stderr or "")
+
+    def _backup(proj_dir: Path) -> bool:
+        src = proj_dir / "scan_result.json"
+        dst = proj_dir / "scan_result_backup.json"
+        if src.exists() and not dst.exists():
+            shutil.copy2(src, dst)
+            return True
+        return False
+
+    def _new_items(proj_dir: Path) -> list[dict]:
+        old_p = proj_dir / "scan_result_backup.json"
+        new_p = proj_dir / "scan_result.json"
+        if not old_p.exists() or not new_p.exists():
+            return []
+        old = json.loads(old_p.read_text(encoding="utf-8"))
+        new = json.loads(new_p.read_text(encoding="utf-8"))
+        old_files = {Path(i.get("file_path", "")).name for i in old.get("items", [])}
+        return [i for i in new.get("items", []) if Path(i.get("file_path", "")).name not in old_files]
+
+    results: list[dict] = []
+    proj_dirs = sorted([d for d in out_dir.iterdir() if d.is_dir()])
+
+    for proj_dir in proj_dirs:
+        scan_json = proj_dir / "scan_result.json"
+        if not scan_json.exists():
+            continue
+        name = proj_dir.name
+        print(f"\n[{name}]")
+
+        backed = _backup(proj_dir)
+        if backed:
+            print("  백업 완료 → scan_result_backup.json")
+
+        d = json.loads(scan_json.read_text(encoding="utf-8"))
+        vendor_dirs = d.get("vendor_dirs") or ([d["vendor_dir"]] if d.get("vendor_dir") else [])
+        if not vendor_dirs or not vendor_dirs[0]:
+            print("  [SKIP] vendor_dirs 없음")
+            continue
+
+        rc, out = _run([python, "main.py", "scan"] + vendor_dirs + ["--project", name])
+        if rc != 0:
+            print(f"  [ERROR] scan 실패: {out[-200:]}")
+            results.append({"name": name, "ok": False, "step": "scan"})
+            continue
+
+        rc, out = _run([python, "main.py", "prepare", name])
+        if rc != 0:
+            print(f"  [ERROR] prepare 실패: {out[-200:]}")
+            results.append({"name": name, "ok": False, "step": "prepare"})
+            continue
+
+        news = _new_items(proj_dir)
+        if news:
+            print(f"  신규 발견 {len(news)}건:")
+            for item in news:
+                date = item.get("date", "")
+                subj = item.get("subject", "")[:40]
+                print(f"    - {date} | {subj}")
+        else:
+            print("  신규 항목 없음")
+
+        results.append({"name": name, "ok": True, "new": len(news)})
+
+    print("\n" + "=" * 60)
+    print("  완료 요약")
+    print("=" * 60)
+    for r in results:
+        if r["ok"]:
+            flag = f"  [신규 {r['new']}건]" if r.get("new") else ""
+            print(f"  ✅ {r['name']}{flag}")
+        else:
+            print(f"  ❌ {r['name']} ({r['step']} 실패)")
+    print("─" * 60)
+
+
 # ── 콤보 명령 ────────────────────────────────────────────────────────────────
 
 def cmd_scan_prepare(raw_args: list[str]):
@@ -1122,10 +1238,12 @@ def main():
     elif cmd in ("compare-all", "compareall", "ca"):
         cmd_compare_all()
 
+    elif cmd in ("rescan-all", "rescanall", "ra"):
+        cmd_rescan_all()
+
     else:
         print(f"알 수 없는 명령: {cmd}")
-        print("사용 가능한 명령: learn | scan | prepare | validate | generate | compare | compare-all")
-        print("콤보 명령:        scanprepare (scan+prepare)  |  finish (validate+generate)")
+        print(__doc__)
         sys.exit(1)
 
 
