@@ -9,29 +9,164 @@
 
 ```
 python work/
-├── .env                                          # API 키 및 인증 정보
+├── .env                                    # API 키 (git 제외)
+├── .gitignore
 ├── README.md
 │
-├── 00_myworks/                                   # Claude.ai 활용 업무 결과물 모음 (코드 없음)
-│   ├── 14_용역수행계획서/                          # 역무구분 기준서
-│   ├── 17_전시&체험/                              # 전시·체험 종합기획서
-│   └── 19_공정팀_제안서/                           # 공정관리 용역 기술제안서
-├── 01_web_automation/                            # 웹 자동화 (Selenium RPA)
-├── 02_gis_visualization/                         # GIS 지오코딩 및 지도 시각화
-├── 03_hwp_reporter/                              # 한글(HWP) 보고서 자동 작성
-├── 04_pdf_reporter/                              # PDF 병합 및 갑지 자동 생성
-├── 05_file_status_checker/                       # 파일 무결성 검사 및 보고서 생성
-├── 06_classification_of_cost_item_groups/        # 산근 비목군 자동 분류
-├── 07_lh-rental-price-matching/                  # LH 임대주택 실거래가 매칭
-├── 08_molit_trade_collector/                     # 국토부 실거래가 대용량 수집
-├── 09_pdf_invoice_extractor_and_excel_filler/    # 세금계산서 PDF 추출 → 엑셀 입력
-├── 10_weather_collector/                         # 기상청 ASOS 기상 데이터 수집
-├── 11_report_craft/                              # 건설공사 분쟁 기술검토 보고서 작성 도구
-├── 12_manhour_aggregation/                       # 돌관공사비 노임 시트 공수 취합
-├── 13_한글2024_macro/                            # 한글 구버전 매크로 → 한글 2024 형식 변환
-├── 18_report_craft/                              # 공기연장 간접비 보고서 자동 생성
-├── 20_report_craft_partially/                    # 귀책분석 파트 자동 생성
-└── 21_crawling_pages/                            # 건설·부동산 관련 웹 크롤링 도구
+├── 01_web_automation/
+│   ├── README.md
+│   └── web_automation.py
+│
+├── 02_gis_visualization/
+│   ├── README.md
+│   ├── spatial_analysis_tool.py
+│   ├── vector_layers.py
+│   └── zone_analysis_distribution.py
+│
+├── 03_hwp_reporter/
+│   ├── README.md
+│   ├── excel_reader.py
+│   ├── hwp_writer.py
+│   ├── main.py
+│   ├── one_file/
+│   │   └── excel_to_hwp.py
+│   ├── requirements.txt
+│   └── utils.py
+│
+├── 04_pdf_reporter/
+│   ├── README.md
+│   ├── build.ps1
+│   ├── excel_to_pdf.py
+│   ├── pdf_merger.py
+│   ├── pdf_merger_essential_numbers.py
+│   ├── pdf_merger_v2.py
+│   ├── pdf_merger_v3.py
+│   ├── pdf_merger_with_bookmark.py
+│   └── pdf_size_splitter.py
+│
+├── 05_file_status_checker/
+│   ├── README.md
+│   ├── check_files.py
+│   └── check_files_build.ps1
+│
+├── 06_classification_of_cost_item_groups/
+│   ├── README.md
+│   ├── build_exe.ps1
+│   ├── item_group_auto_classification_v8.0.py
+│   ├── item_group_auto_classification_v8.1.py
+│   ├── item_group_auto_classification_v8.2.py
+│   └── item_group_auto_classification_v8.3.py   ← 최신
+│
+├── 07_lh-rental-price-matching/
+│   ├── README.md
+│   └── lh_realestate_api.py
+│
+├── 08_molit_trade_collector/
+│   ├── README.md
+│   ├── bulk_collector.bat
+│   ├── bulk_collector.py
+│   ├── check_zero_records.py
+│   └── export_report.py
+│
+├── 09_pdf_invoice_extractor_and_excel_filler/
+│   ├── README.md
+│   ├── build_exe.bat
+│   └── pdf_invoice_extractor_and_excel_filler.py
+│
+├── 10_weather_collector/
+│   ├── README.md
+│   ├── analyzer.py
+│   ├── build.bat
+│   ├── build.py
+│   ├── collector.py
+│   ├── config.py
+│   ├── gui.py                  ← GUI 주 실행 파일
+│   ├── kma_client.py
+│   ├── main.py
+│   ├── scheduler.py
+│   ├── sites.example.json      ← 현장 설정 템플릿 (sites.json은 git 제외)
+│   ├── station_mapper.py
+│   └── storage.py
+│
+├── 11_report_craft/
+│   ├── README.md
+│   ├── extractor.py
+│   ├── generate_prompts_cause.py
+│   └── setup_project.py
+│
+├── 12_manhour_aggregation/
+│   ├── README.md
+│   ├── .env.example
+│   ├── aggregator.py
+│   ├── filler.py
+│   ├── formula_writer.py
+│   ├── main.py
+│   ├── manhour_aggregation.py
+│   ├── pdf_to_excel.py
+│   └── readers/
+│       ├── __init__.py
+│       ├── common.py
+│       └── pdf_reader.py
+│
+├── 13_한글2024_macro/
+│   ├── README.md
+│   └── hwp_renumber.py
+│
+├── 18_report_craft/
+│   ├── ARCHITECTURE.md
+│   ├── .env.example
+│   ├── config.py
+│   ├── main.py
+│   ├── report_template_guide.md
+│   ├── requirements.txt
+│   ├── 분석지시서.md
+│   ├── 사용안내.txt
+│   └── src/
+│       ├── analyzer/
+│       │   ├── analyzer.py
+│       │   ├── data_checker.py
+│       │   └── prompts.py
+│       ├── calculator/
+│       │   └── calculator.py
+│       ├── extractor/
+│       │   ├── file_classifier.py
+│       │   ├── file_extractor.py
+│       │   └── quality_checker.py
+│       └── generator/
+│           ├── build_templates.py
+│           ├── docx_generator.py
+│           ├── laws_db.py
+│           └── md_generator.py
+│
+├── 20_report_craft_partially/
+│   ├── analyze_reports.py
+│   ├── batch_rescan.py
+│   ├── config.py
+│   ├── main.py
+│   ├── make_template.py
+│   ├── make_template_B.py
+│   ├── rebuild_json.py
+│   ├── remember.md
+│   ├── requirements.txt
+│   ├── 귀책분석_패턴집.md
+│   ├── 사용안내.txt
+│   ├── src/
+│   │   ├── correspondence_scanner.py
+│   │   ├── prompt_builder.py
+│   │   ├── reference_learner.py
+│   │   ├── report_generator.py
+│   │   └── text_extractor.py
+│   └── tests/
+│       ├── test_contract_parser.py
+│       └── test_validate.py
+│
+└── 21_crawling_pages/
+    ├── README.md
+    ├── cak_crawler.py
+    ├── csv_to_xlsx.py
+    ├── debug_api.py
+    ├── kosca_crawler.py
+    └── land_price_lookup.py
 ```
 
 ---
