@@ -1278,6 +1278,27 @@ def cmd_interactive():
                 cmd_scan_prepare(scan_args)
             except SystemExit:
                 pass
+
+            # ── 완료 후 안내 ──────────────────────────────────────
+            proj_now = config.load_current_project()
+            if proj_now:
+                proj_dir = config.get_project_dir(proj_now)
+                print()
+                print("  ══════════════════════════════════════════════════")
+                print("  ★ 1단계 완료 — 지금 해야 할 일")
+                print("  ══════════════════════════════════════════════════")
+                print(f"  저장 위치: output\\{proj_dir.name}\\")
+                print()
+                print("  [1] scan_summary.md 를 열어 공문 목록을 확인하세요.")
+                print("      → 관련 없는 공문이 있으면 scan_result.json 에서 해당 줄 삭제")
+                print("      → OCR ⚠️ 표시 항목은 원본 파일로 날짜·공문번호 확인")
+                print()
+                print("  [2] Claude Code 에 다음과 같이 입력하세요:")
+                print(f'      "output\\{proj_dir.name}\\prompt_for_claude.md 읽고')
+                print(f'       귀책분석_data.json 생성해줘"')
+                print()
+                print("  [3] JSON 저장 완료 후 이 프로그램에서 [2] docx 생성 실행")
+                print("  ══════════════════════════════════════════════════")
             _pause()
 
         elif choice == "2":
