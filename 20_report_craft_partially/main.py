@@ -5,53 +5,45 @@
   워크플로우 (신규 프로젝트 추가 시)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  STEP 1 — 공문 스캔
-    python main.py scan "C:\\...\\수신자료" [--project <이름>]
-      → scan_summary.md   : 스캔 결과 요약 (검토·편집 대상)
-      → scan_borderline.md: 관련 여부 판단이 필요한 경계선 공문 목록
+  STEP 1 — 스캔 + 프롬프트 생성
+    python main.py scanprepare "C:\\...\\수신자료" [--project <이름>]
+      → scan_summary.md   : 스캔 결과 요약 (검토·편집 후 필요 시 재prepare)
+      → scan_borderline.md: 경계선 공문 목록 (포함 여부 직접 판단)
       → scan_result.json  : 공문 목록 (직접 편집 가능)
-      → correspondence_texts.md: 공문 원문 텍스트
-
-  STEP 2 — 프롬프트 생성
-    python main.py prepare [프로젝트명]
       → prompt_for_claude.md: Claude Code에 전달할 귀책분석 작성 지시서
 
-  STEP 3 — Claude Code가 귀책분석 JSON 작성
+  STEP 2 — Claude Code가 귀책분석 JSON 작성
     Claude Code가 prompt_for_claude.md 를 읽고
     output/<프로젝트명>/귀책분석_data.json 을 직접 저장.
 
-  STEP 4 — 사전 검증
-    python main.py validate [프로젝트명]
-      → 스키마 오류·소결 누락·delay_days 불일치 등을 generate 전에 점검
-      → 오류 발견 시 Claude에게 전달할 수정 요청 블록 자동 출력
+  STEP 3 — 사전 검증 + docx 생성
+    python main.py finish [프로젝트명]
+      → validate: 스키마 오류·소결 누락·delay_days 불일치 점검
+        오류 발견 시 Claude에게 전달할 수정 요청 블록 자동 출력
+      → generate: 02_귀책분석_[프로젝트명]_[날짜].docx (검증 통과 시에만)
 
-  STEP 5 — docx 생성
-    python main.py generate [프로젝트명]
-      → 02_귀책분석_[프로젝트명]_[날짜].docx
-
-  STEP 6 — 품질 검증
-    python main.py compare [프로젝트명]   # 단일 프로젝트
-    python main.py compare-all            # 전체 일괄
+  STEP 4 — 품질 검증
+    python main.py compare [프로젝트명]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   전체 명령 목록
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  python main.py learn                                     # reference 보고서 패턴 학습
-  python main.py scan   <공문폴더경로> [--project <이름>]  # 공문 스캔
-  python main.py prepare [프로젝트명]                      # Claude 지시서 생성
-  python main.py validate [프로젝트명]                     # JSON 사전 검증
-  python main.py generate [프로젝트명]                     # docx 생성
-  python main.py compare  [프로젝트명]                     # 단일 품질 비교
-  python main.py compare-all                               # 전체 품질 비교
-  python main.py rescan-all                                # 전체 프로젝트 일괄 재스캔+재prepare
+  python main.py learn                                          # reference 보고서 패턴 학습
+  python main.py scanprepare <공문폴더경로> [--project <이름>]  # 스캔 + 프롬프트 생성 (콤보)
+  python main.py validate    [프로젝트명]                       # JSON 사전 검증
+  python main.py generate    [프로젝트명]                       # docx 생성
+  python main.py finish      [프로젝트명]                       # validate + generate (콤보)
+  python main.py compare     [프로젝트명]                       # 단일 품질 비교
+  python main.py compare-all                                    # 전체 품질 비교
+  python main.py rescan-all                                     # 전체 프로젝트 일괄 재스캔
 
-콤보 명령:
-  python main.py scanprepare <공문폴더경로> [--project <이름>]  # scan + prepare
-  python main.py finish [프로젝트명]                            # validate + generate
+개별 명령 (scanprepare·finish 분해 시):
+  python main.py scan    <공문폴더경로> [--project <이름>]  # 스캔만
+  python main.py prepare [프로젝트명]                       # 프롬프트 생성만
 
-  --project 옵션: scan 단계에서 폴더명 대신 원하는 프로젝트명 지정
-    예) python main.py scan "C:\\...\\수신자료" --project 인덕원5공구
+  --project 옵션: scanprepare/scan 단계에서 폴더명 대신 원하는 프로젝트명 지정
+    예) python main.py scanprepare "C:\\...\\수신자료" --project 인덕원5공구
 """
 
 import io
