@@ -325,7 +325,7 @@ def build(output_dir: Path, project_name: str = "") -> Path:
              "⚠️ **공문·변경계약서에 실제로 인용된 조항만 사용하세요.** 아래는 참조용입니다.",
              "", "| 조항 | 내용 | 적용 계약 유형 |", "|------|------|--------------|"]
     _seen: set[str] = set()
-    for _lt, _rows in _config.CONTRACT_CLAUSES.items():
+    for _lt, _rows in config.CONTRACT_CLAUSES.items():
         for _cl, _ds in _rows:
             if _cl not in _seen:
                 _ctbl.append(f"| {_cl} | {_ds} | {_lt} |")
