@@ -19,23 +19,24 @@
     - Tesseract-OCR/는 선택 사항 (없으면 C:\\Program Files\\Tesseract-OCR\\ 자동 탐색)
 """
 
-import sys
-from pathlib import Path
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 block_cipher = None
+
+# tkinter 전체 수집 (TCL/TK 라이브러리 포함)
+tk_datas, tk_binaries, tk_hiddenimports = collect_all('tkinter')
 
 # ── 분석 ─────────────────────────────────────────────────────────────────────
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[],
+    binaries=[] + tk_binaries,
     datas=[
         # 귀책분석 패턴집 — BASE_DIR 바로 아래에 위치해야 하므로 '.' 로 지정
         ('귀책분석_패턴집.md', '.'),
         # 레퍼런스 학습 결과 — 배포 전 미리 생성해서 포함
-        # (output/reference_patterns.md 가 존재하면 포함, 없으면 빌드 전 learn 실행)
         ('output/reference_patterns.md', 'output'),
-    ],
+    ] + tk_datas,
     hiddenimports=[
         # PyMuPDF (fitz)
         'fitz',
@@ -62,11 +63,10 @@ a = Analysis(
         'dotenv',
         # GUI
         'gui',
-        'tkinter',
-        'tkinter.ttk',
-        'tkinter.filedialog',
-        'tkinter.messagebox',
-        'tkinter.scrolledtext',
+        # 표준 라이브러리 (간혹 누락)
+        'xml.etree.ElementTree',
+        'zipfile',
+        'shutil',
         # src 모듈
         'src',
         'src.text_extractor',
@@ -74,11 +74,7 @@ a = Analysis(
         'src.prompt_builder',
         'src.report_generator',
         'src.reference_learner',
-        # 표준 라이브러리 (간혹 누락)
-        'xml.etree.ElementTree',
-        'zipfile',
-        'shutil',
-    ],
+    ] + tk_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -96,7 +92,6 @@ a = Analysis(
         'jupyter',
         'IPython',
         'notebook',
-        'tkinter',
         'wx',
         'PyQt5',
         'PyQt6',

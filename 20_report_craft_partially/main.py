@@ -1355,15 +1355,25 @@ def main():
     args = sys.argv[1:]
 
     if not args:
-        # 인수 없이 실행 — GUI (더블클릭 포함), 실패 시 콘솔 메뉴 폴백
+        # 인수 없이 실행 — GUI (더블클릭 포함)
         try:
             from gui import run_gui
             run_gui()
-        except Exception:
-            try:
-                cmd_interactive()
-            except (KeyboardInterrupt, EOFError):
-                print("\n  종료합니다.")
+        except Exception as _gui_err:
+            if getattr(sys, "frozen", False):
+                # exe 환경: 콘솔 없으므로 input() 사용 불가 — 오류 다이얼로그만 표시
+                try:
+                    import tkinter.messagebox as _mb
+                    _mb.showerror("실행 오류",
+                                  f"GUI를 시작할 수 없습니다.\n\n{_gui_err}")
+                except Exception:
+                    pass
+            else:
+                # 개발 환경 폴백: 콘솔 메뉴
+                try:
+                    cmd_interactive()
+                except (KeyboardInterrupt, EOFError):
+                    print("\n  종료합니다.")
         return
 
     cmd = args[0].lower()
