@@ -1096,7 +1096,6 @@ def cmd_rescan_all():
     - 이전 scan_result.json vs 새 결과 비교 → 신규 발견 항목 리포트
     """
     import shutil
-    import subprocess
 
     _print_header()
     print("\n[일괄 재스캔 + 재prepare]")
@@ -1106,16 +1105,6 @@ def cmd_rescan_all():
     if not out_dir.exists():
         print("[오류] output/ 폴더가 없습니다.")
         sys.exit(1)
-
-    python = sys.executable
-
-    def _run(cmd: list[str]) -> tuple[int, str]:
-        res = subprocess.run(
-            cmd,
-            cwd=str(Path(__file__).parent),
-            capture_output=True, encoding="utf-8", errors="replace",
-        )
-        return res.returncode, (res.stdout or "") + (res.stderr or "")
 
     def _backup(proj_dir: Path) -> bool:
         src = proj_dir / "scan_result.json"
@@ -1150,20 +1139,26 @@ def cmd_rescan_all():
             print("  백업 완료 → scan_result_backup.json")
 
         d = json.loads(scan_json.read_text(encoding="utf-8"))
-        vendor_dirs = d.get("vendor_dirs") or ([d["vendor_dir"]] if d.get("vendor_dir") else [])
-        if not vendor_dirs or not vendor_dirs[0]:
+        vendor_dirs_raw = d.get("vendor_dirs") or ([d["vendor_dir"]] if d.get("vendor_dir") else [])
+        if not vendor_dirs_raw or not vendor_dirs_raw[0]:
             print("  [SKIP] vendor_dirs 없음")
             continue
 
-        rc, out = _run([python, "main.py", "scan"] + vendor_dirs + ["--project", name])
-        if rc != 0:
-            print(f"  [ERROR] scan 실패: {out[-200:]}")
+        vendor_dirs = [Path(p) for p in vendor_dirs_raw]
+
+        # ── scan (직접 함수 호출 — exe 환경에서도 동작) ─────────────────────
+        try:
+            scan(vendor_dirs, proj_dir)
+        except Exception as e:
+            print(f"  [ERROR] scan 실패: {e}")
             results.append({"name": name, "ok": False, "step": "scan"})
             continue
 
-        rc, out = _run([python, "main.py", "prepare", name])
-        if rc != 0:
-            print(f"  [ERROR] prepare 실패: {out[-200:]}")
+        # ── prepare (직접 함수 호출) ─────────────────────────────────────────
+        try:
+            build_prompt(proj_dir, name)
+        except Exception as e:
+            print(f"  [ERROR] prepare 실패: {e}")
             results.append({"name": name, "ok": False, "step": "prepare"})
             continue
 
