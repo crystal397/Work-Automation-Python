@@ -1,9 +1,15 @@
 # file
+00_myworks/
 *.xlsx
 *.db
 logs/
 *.hwpx
+*.hwp
 *.pdf
+*.doc
+*.docx
+*.pptx
+*.ppt
 
 메일 피드백 사항.txt
 *.exe
@@ -12,6 +18,20 @@ SignalAI_사용법.txt
 승승아빠-한글매크로-250124(공개용)
 *.msr
 *.mcr
+projects
+
+# 실제 의뢰인 데이터 폴더
+**/reference/
+**/output/
+**/output(*/
+16_사토 운반관리/
+15_논문 작성/
+
+# 분석 중간 산출물 (실제 의뢰인 데이터 포함)
+compare_output.txt
+
+# 현장 정보 (실제 현장명·위경도 포함)
+**/sites.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -45,7 +65,7 @@ MANIFEST
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
-#*.spec
+*.spec
 
 # Installer logs
 pip-log.txt
@@ -150,7 +170,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+**/.env
 .envrc
 .venv
 env/

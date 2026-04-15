@@ -2,7 +2,7 @@ import subprocess
 import sys
 
 args = [
-    r"C:\Users\CT Group\AppData\Local\Programs\Python\Python312\python.exe", "-m", "PyInstaller",
+    sys.executable, "-m", "PyInstaller",
     "--noconfirm",
     "--onefile",
     "--windowed",
