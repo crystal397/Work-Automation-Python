@@ -240,7 +240,7 @@ class App(tk.Tk):
             args = raw[:]
             if project:
                 args += ["--project", project]
-            cmd_scan_prepare(args)
+            cmd_scan_prepare(args, _gui_mode=True)
 
             # ── 완료 안내 ─────────────────────────────────────
             proj_now = config.load_current_project()

@@ -336,9 +336,9 @@ def cmd_scan(raw_args: list[str]):
 
 # ── Step 3: prepare ──────────────────────────────────────────────────────────
 
-def cmd_prepare(project_name: str | None):
+def cmd_prepare(project_name: str | None, _gui_mode: bool = False):
     _print_header()
-    print("\n[3단계] claude.ai 프롬프트 조립")
+    print("\n[3단계] 프롬프트 조립")
     print("─" * 60)
 
     project_name, project_dir = _resolve_project_dir(project_name)
@@ -355,21 +355,14 @@ def cmd_prepare(project_name: str | None):
 
     print("\n" + "─" * 60)
     print("프롬프트 생성 완료.")
-    print(f"\n→ {prompt_path}")
-    print("\n다음 단계 (둘 중 하나 선택):")
-    print()
-    print("  ★ Claude Code 사용 (터미널에서 바로):")
-    print(f'    "output/{project_dir.name}/prompt_for_claude.md 읽고')
-    print(f'     귀책분석_data.json 생성해줘"')
-    print(f"    → Claude Code가 파일을 읽고 분석하여 JSON을 직접 저장")
-    print()
-    print("  ★ claude.ai 사용 (웹 브라우저):")
-    print("    1. prompt_for_claude.md 전체 내용을 복사")
-    print("    2. claude.ai 새 대화창에 붙여넣기")
-    print("    3. claude.ai가 작성한 JSON 전체를 복사")
-    print(f"    4. output/{project_dir.name}/귀책분석_data.json 파일로 저장")
-    print()
-    print("  → 완료 후: python main.py generate")
+
+    if not _gui_mode:
+        # CLI 전용 안내
+        print(f"\n→ output/{project_dir.name}/prompt_for_claude.md")
+        print("\n다음 단계:")
+        print(f'  "output/{project_dir.name}/prompt_for_claude.md 읽고')
+        print(f'   귀책분석_data.json 생성해줘"')
+        print("  → 완료 후: python main.py generate")
 
 
 # ── Step 4: generate ─────────────────────────────────────────────────────────
@@ -1188,12 +1181,11 @@ def cmd_rescan_all():
 
 # ── 콤보 명령 ────────────────────────────────────────────────────────────────
 
-def cmd_scan_prepare(raw_args: list[str]):
+def cmd_scan_prepare(raw_args: list[str], _gui_mode: bool = False):
     """scan + prepare 한 번에 실행."""
     cmd_scan(raw_args)
-    # scan이 current_project를 저장하므로 project_name=None으로 자동 참조
     print()
-    cmd_prepare(None)
+    cmd_prepare(None, _gui_mode=_gui_mode)
 
 
 def cmd_finish(project_name: str | None):
