@@ -2,21 +2,31 @@
 귀책분석 자동화 시스템 — 설정값
 
 ※ Claude API는 사용하지 않습니다.
-   Python이 파일 추출/필터링, claude.ai가 분석 작성, Python이 docx 생성합니다.
+   Python이 파일 추출/필터링, Claude Code가 분석 작성, Python이 docx 생성합니다.
 """
 
 import os
 import re
+import sys
 from pathlib import Path
+
+# ── PyInstaller 대응: exe로 패키징 시 __file__ 이 임시 디렉토리를 가리킴 ────────
+# exe 실행 시: sys.frozen = True, sys._MEIPASS = 번들된 리소스 임시 경로
+# exe 외부 파일(reference/, output/)은 exe가 있는 폴더 기준으로 접근
+if getattr(sys, "frozen", False):
+    # exe로 실행 중 — exe 파일이 있는 폴더를 BASE_DIR로 사용
+    BASE_DIR = Path(sys.executable).parent
+else:
+    # 일반 Python 스크립트 실행
+    BASE_DIR = Path(__file__).parent
 
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env", override=False)
+    load_dotenv(BASE_DIR / ".env", override=False)
 except ImportError:
     pass
 
 # ── 기본 경로 ──────────────────────────────────────────────────────────────────
-BASE_DIR      = Path(__file__).parent
 REFERENCE_DIR = BASE_DIR / "reference"
 OUTPUT_DIR    = BASE_DIR / "output"
 
@@ -68,7 +78,25 @@ CONTRACT_CLAUSES = {
 }
 
 # ── OCR ────────────────────────────────────────────────────────────────────────
-TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Tesseract 탐색 순서:
+#   1. 배포 패키지 내 Tesseract-OCR/ 폴더 (exe 옆에 위치)
+#   2. 표준 설치 경로 C:\Program Files\Tesseract-OCR\
+#   3. 환경변수 TESSERACT_PATH 로 직접 지정
+def _find_tesseract() -> str:
+    candidates = [
+        BASE_DIR / "Tesseract-OCR" / "tesseract.exe",           # 배포 패키지 내 동봉
+        Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),   # 표준 설치 경로
+        Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+    ]
+    env_path = os.environ.get("TESSERACT_PATH", "")
+    if env_path:
+        candidates.insert(0, Path(env_path))
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return str(candidates[0])  # 못 찾아도 기본값 반환 (OCR 미사용 시 무해)
+
+TESSERACT_PATH = _find_tesseract()
 TESSERACT_LANG = "kor+eng"
 PDF_OCR_MAX_PAGES = 100   # 이 값 초과 시 OCR 생략
 PDF_FAST_MAX_MB   = 20    # 이 값 초과 시 PyMuPDF 단독 사용
