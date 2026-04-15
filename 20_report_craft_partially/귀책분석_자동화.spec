@@ -32,9 +32,9 @@ a = Analysis(
     pathex=['.'],
     binaries=[] + tk_binaries,
     datas=[
-        # 귀책분석 패턴집 — BASE_DIR 바로 아래에 위치해야 하므로 '.' 로 지정
+        # 귀책분석 패턴집 — _internal/ 에 번들 (코드가 BUNDLE_DIR에서 탐색)
         ('귀책분석_패턴집.md', '.'),
-        # 레퍼런스 학습 결과 — 있을 때만 포함 (없어도 빌드 가능, 실행 시 경고만)
+        # 레퍼런스 학습 결과 — 있을 때만 포함
         *([('output/reference_patterns.md', 'output')]
           if Path('output/reference_patterns.md').exists() else []),
     ] + tk_datas,

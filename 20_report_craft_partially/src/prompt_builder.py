@@ -265,7 +265,6 @@ def build(output_dir: Path, project_name: str = "") -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── 파일 로드 ──────────────────────────────────────────────────────────────
-    ref_pattern_path = output_dir.parent / "reference_patterns.md"  # learn 결과 (output/ 루트)
     corr_texts_path  = output_dir / "correspondence_texts.md"
     scan_result_path = output_dir / "scan_result.json"
 
@@ -277,18 +276,28 @@ def build(output_dir: Path, project_name: str = "") -> Path:
             "스캔이 완료되지 않았습니다. 먼저 [1] 스캔을 실행하세요."
         )
 
-    # reference_patterns.md 는 선택 — 없어도 진행 (품질은 다소 낮아질 수 있음)
-    if ref_pattern_path.exists():
-        ref_text = ref_pattern_path.read_text(encoding="utf-8")
+    # reference_patterns.md: BASE_DIR/output/ 먼저, 없으면 BUNDLE_DIR/output/ 확인
+    # (exe 배포 시 번들 내 _internal/output/에 위치)
+    _ref_candidates = [
+        output_dir.parent / "reference_patterns.md",          # BASE_DIR/output/ (일반·배포 후 복사)
+        config.BUNDLE_DIR / "output" / "reference_patterns.md",  # BUNDLE_DIR/_internal/output/
+    ]
+    ref_path_found = next((p for p in _ref_candidates if p.exists()), None)
+    if ref_path_found:
+        ref_text = ref_path_found.read_text(encoding="utf-8")
     else:
         ref_text = ""
         print("  ⚠️  reference_patterns.md 없음 — 참고 패턴 없이 프롬프트를 생성합니다.")
+
     corr_text = corr_texts_path.read_text(encoding="utf-8")
 
-    # 귀책분석 패턴집 (없으면 빈 문자열)
-    # output_dir = .../output/<프로젝트명>/ → .parent = .../output/ → .parent = 프로젝트 루트
-    pattern_book_path = output_dir.parent.parent / "귀책분석_패턴집.md"
-    pattern_book_text = pattern_book_path.read_text(encoding="utf-8") if pattern_book_path.exists() else ""
+    # 귀책분석 패턴집: BASE_DIR 먼저, 없으면 BUNDLE_DIR 확인
+    _pb_candidates = [
+        output_dir.parent.parent / "귀책분석_패턴집.md",   # BASE_DIR/
+        config.BUNDLE_DIR / "귀책분석_패턴집.md",           # _internal/
+    ]
+    pb_path_found = next((p for p in _pb_candidates if p.exists()), None)
+    pattern_book_text = pb_path_found.read_text(encoding="utf-8") if pb_path_found else ""
 
     with open(scan_result_path, encoding="utf-8") as f:
         scan_data = json.load(f)

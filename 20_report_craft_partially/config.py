@@ -10,15 +10,18 @@ import re
 import sys
 from pathlib import Path
 
-# ── PyInstaller 대응: exe로 패키징 시 __file__ 이 임시 디렉토리를 가리킴 ────────
-# exe 실행 시: sys.frozen = True, sys._MEIPASS = 번들된 리소스 임시 경로
-# exe 외부 파일(reference/, output/)은 exe가 있는 폴더 기준으로 접근
+# ── PyInstaller 대응 ────────────────────────────────────────────────────────
+# exe 실행 시: sys.frozen = True
+#   - BASE_DIR  : exe 파일이 있는 폴더 (사용자 파일 — output/, reference/ 등)
+#   - BUNDLE_DIR: 번들된 읽기 전용 리소스 위치
+#     PyInstaller 6+: _internal/ 폴더 = sys._MEIPASS
+#     이전 버전:       exe 옆 = sys.executable.parent
 if getattr(sys, "frozen", False):
-    # exe로 실행 중 — exe 파일이 있는 폴더를 BASE_DIR로 사용
-    BASE_DIR = Path(sys.executable).parent
+    BASE_DIR   = Path(sys.executable).parent
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", sys.executable)).parent
 else:
-    # 일반 Python 스크립트 실행
-    BASE_DIR = Path(__file__).parent
+    BASE_DIR   = Path(__file__).parent
+    BUNDLE_DIR = BASE_DIR
 
 try:
     from dotenv import load_dotenv
