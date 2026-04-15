@@ -199,9 +199,11 @@ class App(tk.Tk):
         self._out.configure(state="disabled")
 
     def _browse(self):
-        folder = filedialog.askdirectory(title="수신자료 폴더 선택")
+        folder = filedialog.askdirectory(parent=self, title="수신자료 폴더 선택")
         if folder:
             self._path_var.set(folder)
+        self.lift()
+        self.focus_force()
 
     def _run_thread(self, fn):
         """fn 을 별도 스레드에서 실행하고, 완료 시 버튼 복원."""
