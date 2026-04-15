@@ -32,6 +32,9 @@ a = Analysis(
     datas=[
         # 귀책분석 패턴집 — BASE_DIR 바로 아래에 위치해야 하므로 '.' 로 지정
         ('귀책분석_패턴집.md', '.'),
+        # 레퍼런스 학습 결과 — 배포 전 미리 생성해서 포함
+        # (output/reference_patterns.md 가 존재하면 포함, 없으면 빌드 전 learn 실행)
+        ('output/reference_patterns.md', 'output'),
     ],
     hiddenimports=[
         # PyMuPDF (fitz)
