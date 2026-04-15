@@ -269,20 +269,20 @@ def build(output_dir: Path, project_name: str = "") -> Path:
     corr_texts_path  = output_dir / "correspondence_texts.md"
     scan_result_path = output_dir / "scan_result.json"
 
-    missing = []
-    for p in [ref_pattern_path, corr_texts_path, scan_result_path]:
-        if not p.exists():
-            missing.append(p.name)
+    # 스캔 결과 파일은 필수
+    missing = [p.name for p in [corr_texts_path, scan_result_path] if not p.exists()]
     if missing:
-        msgs = [f"필요한 파일이 없습니다: {', '.join(missing)}"]
-        if "reference_patterns.md" in missing:
-            msgs.append("reference_patterns.md 가 output/ 폴더에 없습니다.")
-            msgs.append("배포 패키지에 이 파일이 포함되어 있는지 확인하세요.")
-        if any(f in missing for f in ("correspondence_texts.md", "scan_result.json")):
-            msgs.append("스캔이 완료되지 않았습니다. 먼저 [1] 스캔을 실행하세요.")
-        raise FileNotFoundError("\n".join(msgs))
+        raise FileNotFoundError(
+            f"필요한 파일이 없습니다: {', '.join(missing)}\n"
+            "스캔이 완료되지 않았습니다. 먼저 [1] 스캔을 실행하세요."
+        )
 
-    ref_text  = ref_pattern_path.read_text(encoding="utf-8")
+    # reference_patterns.md 는 선택 — 없어도 진행 (품질은 다소 낮아질 수 있음)
+    if ref_pattern_path.exists():
+        ref_text = ref_pattern_path.read_text(encoding="utf-8")
+    else:
+        ref_text = ""
+        print("  ⚠️  reference_patterns.md 없음 — 참고 패턴 없이 프롬프트를 생성합니다.")
     corr_text = corr_texts_path.read_text(encoding="utf-8")
 
     # 귀책분석 패턴집 (없으면 빈 문자열)
