@@ -387,15 +387,19 @@ python main.py [--input 폴더경로] [--output 폴더경로]
 
 ## 설정 (`config.py`)
 
+모든 민감값은 `.env` 또는 환경변수로 관리합니다. `.env.example` 참고.
+
 ```python
-ANTHROPIC_API_KEY = "..."          # Claude API 키
-TESSERACT_PATH    = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-TESSERACT_LANG    = "kor+eng"
-CLAUDE_MODEL      = "claude-sonnet-4-6"
-INPUT_DIR         = "input"
-OUTPUT_DIR        = "output"
-LAW_DIR           = "법령"
-TEMPLATE_GUIDE    = "report_template_guide.md"
+# .env 또는 환경변수로 설정
+REPORT_INPUT_DIR   = ...   # 수신자료 폴더 (기본: input/)
+REPORT_OUTPUT_DIR  = ...   # 결과물 저장 (기본: output/)
+REPORT_AUTHOR      = ...   # 보고서 작성 회사명
+
+# config.py 내 고정값
+TESSERACT_PATH  = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+TESSERACT_LANG  = "kor+eng"
+LAW_DIR         = "법령"
+TEMPLATE_GUIDE  = "report_template_guide.md"
 ```
 
 ---
@@ -433,14 +437,18 @@ TEMPLATE_GUIDE    = "report_template_guide.md"
 | 순서 | 파일 | 상태 |
 |------|------|------|
 | 1 | `src/extractor/file_extractor.py` | ✅ 완료 |
-| 2 | `src/extractor/quality_checker.py` | ✅ 완료 |
-| 3 | `config.py` | 🔲 |
-| 4 | `src/analyzer/prompts.py` | 🔲 |
-| 5 | `src/analyzer/analyzer.py` | 🔲 |
-| 6 | `src/calculator/calculator.py` | 🔲 |
-| 7 | `src/generator/md_generator.py` | 🔲 |
-| 8 | `src/generator/docx_generator.py` | 🔲 |
-| 9 | `main.py` | 🔲 |
+| 2 | `src/extractor/file_classifier.py` | ✅ 완료 |
+| 3 | `src/extractor/quality_checker.py` | ✅ 완료 |
+| 4 | `config.py` | ✅ 완료 |
+| 5 | `src/analyzer/prompts.py` | ✅ 완료 |
+| 6 | `src/analyzer/analyzer.py` | ✅ 완료 |
+| 7 | `src/analyzer/data_checker.py` | ✅ 완료 |
+| 8 | `src/calculator/calculator.py` | ✅ 완료 |
+| 9 | `src/generator/laws_db.py` | ✅ 완료 |
+| 10 | `src/generator/build_templates.py` | ✅ 완료 |
+| 11 | `src/generator/md_generator.py` | ✅ 완료 |
+| 12 | `src/generator/docx_generator.py` | ✅ 완료 |
+| 13 | `main.py` | ✅ 완료 |
 
 ---
 
