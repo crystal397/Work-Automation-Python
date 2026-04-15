@@ -60,6 +60,13 @@ a = Analysis(
         'tqdm',
         # python-dotenv
         'dotenv',
+        # GUI
+        'gui',
+        'tkinter',
+        'tkinter.ttk',
+        'tkinter.filedialog',
+        'tkinter.messagebox',
+        'tkinter.scrolledtext',
         # src 모듈
         'src',
         'src.text_extractor',
