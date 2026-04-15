@@ -560,18 +560,26 @@ def cmd_validate(project_name: str | None, _stop_on_error: bool = True) -> bool:
                 )
 
     # ── [경고] responsible_party 유효값 확인 ─────────────────────────
-    _VALID_PARTIES = {"발주처", "시공사", "감리", "불가항력", "제3자"}
+    # compare CHECK 6과 동일한 기준 사용
+    # 국가/지방계약: 발주처·발주자·시공사·수급인  /  민간계약: 도급인·수급인  /  기타: 공동귀책
+    _VALID_PARTIES = {"발주처", "발주자", "도급인", "시공사", "수급인", "공동귀책"}
+    import re as _re_rp
+    def _strip_rp(v: str) -> str:
+        v = v.replace("\n", "").strip()
+        m = _re_rp.match(r"^(발주처|발주자|도급인|시공사|수급인|공동귀책)", v)
+        return m.group(1) if m else v
     if isinstance(diagram, list):
         for i, row in enumerate(diagram):
             if not isinstance(row, dict):
                 continue
             rp = (row.get("responsible_party") or "").strip()
-            if rp and rp not in _VALID_PARTIES:
+            if rp and _strip_rp(rp) not in _VALID_PARTIES:
                 cause_label = (row.get("cause") or row.get("delay_cause") or f"항목 {i+1}")[:30]
                 soft_warnings.append(
                     f"  [경고] accountability_diagram[{i}] ('{cause_label}')\n"
                     f"     responsible_party='{rp}' 가 표준값이 아닙니다.\n"
-                    f"     표준값: {' / '.join(sorted(_VALID_PARTIES))}"
+                    f"     표준값: 발주처 / 발주자 / 도급인 / 시공사 / 수급인 / 공동귀책\n"
+                    f"     괄호 부연 허용: 예) '발주처(한국가스공사)', '도급인 (수급인의 책임 없는 사유)'"
                 )
 
     # ── [경고] items 날짜 미확정 / doc_number OCR 아티팩트 / scan_no null ─
@@ -822,14 +830,26 @@ def _compare_one(project_dir: Path, ref_path: Path) -> dict:
     total_dd = data.get("total_delay_days")
 
     # CHECK 1: total_delay_days가 reference 텍스트에 등장하는지
+    # PDF 텍스트 역순 추출 대응: "일184" 형태도 함께 탐색
     if total_dd:
-        pattern = str(total_dd) + r"\s*일"
-        found_in_ref = bool(_re.search(pattern, ref_text))
-        checks.append(_check_item(
-            f"total_delay_days({total_dd}일) — reference에 등장",
-            found_in_ref,
-            "" if found_in_ref else f"reference 텍스트에서 '{total_dd}일' 미발견"
-        ))
+        fwd = bool(_re.search(str(total_dd) + r"\s*일", ref_text))   # "184일"
+        rev = bool(_re.search(r"일\s*" + str(total_dd), ref_text))   # "일184" (PDF 역순)
+        found_in_ref = fwd or rev
+
+        # reference 텍스트가 너무 짧으면 추출 실패로 간주 → warning으로 격하
+        ref_too_short = len(ref_text.strip()) < 500
+        if ref_too_short:
+            checks.append(_check_item(
+                f"total_delay_days({total_dd}일) — reference에 등장",
+                None,  # type: ignore
+                "reference 텍스트 추출 실패 (스캔 PDF 또는 추출 오류) — 수동 확인 필요"
+            ))
+        else:
+            checks.append(_check_item(
+                f"total_delay_days({total_dd}일) — reference에 등장",
+                found_in_ref,
+                "" if found_in_ref else f"reference에서 '{total_dd}일' 미발견 (분산 기재 또는 reference 불일치 가능)"
+            ))
     else:
         checks.append(_check_item("total_delay_days 설정 여부", False, "data.json에 total_delay_days 없음"))
 
@@ -912,12 +932,14 @@ def _compare_one(project_dir: Path, ref_path: Path) -> dict:
         checks.append(_check_item(f"필수 섹션 — {label}", ok, "" if ok else f"'{field}' 비어 있음"))
 
     # CHECK 6: responsible_party 비표준값 감지 (줄바꿈·괄호 내용 제거 후 판단)
+    # 표준값: 국가/지방계약(발주처·발주자·시공사·수급인) + 민간계약(도급인·수급인) + 공동귀책
     _STD_RP = {"발주처", "발주자", "도급인", "시공사", "수급인", "공동귀책", ""}
     def _normalize_rp(v: str) -> str:
         import re as _re2
         v = v.replace("\n", "").strip()
-        # 괄호 포함 값에서 기본 키워드만 추출: "발주처(한국가스공사)" → "발주처"
-        m = _re2.match(r"^(발주처|발주자|시공사|수급인|공동귀책)", v)
+        # 괄호/부연 포함 값에서 기본 키워드만 추출
+        # 예: "발주처(한국가스공사)" → "발주처", "도급인 (수급인의 책임 없는 사유)" → "도급인"
+        m = _re2.match(r"^(발주처|발주자|도급인|시공사|수급인|공동귀책)", v)
         return m.group(1) if m else v
     non_std = [
         r.get("responsible_party", "") for r in diag
