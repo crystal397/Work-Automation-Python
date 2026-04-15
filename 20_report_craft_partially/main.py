@@ -841,42 +841,62 @@ def _compare_one(project_dir: Path, ref_path: Path) -> dict:
         "" if diag_sum == total_dd else f"불일치: 합계 {diag_sum} ≠ {total_dd}"
     ))
 
-    # CHECK 3: accountability_diagram 행 수 vs reference 귀책 표 행 수
+    # CHECK 3: output docx의 귀책 도식표 행 수 = accountability_diagram 행 수
+    # (reference는 법령 조문 인용 표만 있고 프로젝트별 요약 표가 없으므로, output docx를 직접 검증)
     diag_rows = len([r for r in diag if isinstance(r, dict)])
-    if ref_acc_table:
-        # 첫 행을 헤더로 간주, 합계/소계 행 제외
-        sum_kws = {"합계", "소계", "계", "total", "sum"}
-        data_rows_ref = [
-            r for r in ref_acc_table[1:]  # 첫 행(헤더) 제외
-            if not any(cell.strip() in sum_kws or cell.strip().lower() in sum_kws
+    out_docx_files = sorted(project_dir.glob("02_귀책분석_*.docx"))
+    out_acc_table: "list[list[str]] | None" = None
+    if out_docx_files:
+        out_tables = _extract_ref_tables(out_docx_files[-1])  # 최신 파일
+        # output의 귀책 요약 표: 헤더에 '공기지연 사유' 또는 '귀책' 포함
+        _ACC_KWS = {"공기지연 사유", "공기지연사유", "귀책사유", "귀책", "지연사유"}
+        for t in reversed(out_tables):
+            if not t or len(t[0]) < 2:
+                continue
+            h = " ".join(c.replace(" ", "") for c in t[0])
+            if any(kw.replace(" ", "") in h for kw in _ACC_KWS):
+                # 법령 조문 열거 패턴 제외: 데이터 첫 행이 "1)", "가.", "①" 등으로 시작
+                import re as _re2
+                _LAW2 = _re2.compile(r"^(?:[0-9]+\)|[가-힣]\.|[①-⑳]|제\s*[0-9]+)")
+                dr = t[1:] if len(t) > 1 else []
+                if dr and _LAW2.match(dr[0][0].strip() if dr[0] else ""):
+                    continue
+                out_acc_table = t
+                break
+
+    if out_acc_table:
+        sum_kws2 = {"합계", "소계", "계", "total", "sum"}
+        out_data_rows = [
+            r for r in out_acc_table[1:]
+            if not any(cell.strip() in sum_kws2 or cell.strip().lower() in sum_kws2
                        for cell in r)
         ]
-        ref_row_count = len(data_rows_ref)
-        match = (diag_rows == ref_row_count)
+        out_row_count = len(out_data_rows)
+        match = (diag_rows == out_row_count)
         checks.append(_check_item(
-            f"귀책 도식표 데이터 행 수(output {diag_rows}행 vs reference {ref_row_count}행)",
+            f"output docx 귀책 표 행 수 일치 (data {diag_rows}행 vs docx {out_row_count}행)",
             match,
-            "" if match else f"output {diag_rows}행 ≠ reference {ref_row_count}행"
+            "" if match else f"data {diag_rows}행 ≠ docx {out_row_count}행 (생성 누락 의심)"
         ))
     else:
         checks.append(_check_item(
-            "귀책 도식표 행 수 비교",
+            "output docx 귀책 표 행 수 일치",
             None,  # type: ignore
-            "reference에서 귀책 표를 찾지 못함 (수동 확인 필요)"
+            "output docx에서 귀책 표를 찾지 못함 (generate 미실행 또는 형식 변경)"
         ))
 
-    # CHECK 4: reference 귀책 표 컬럼 수
-    if ref_acc_table and ref_acc_table[0]:
-        ref_col_count = len(ref_acc_table[0])
-        # 5컬럼(국가계약) or 3컬럼(지방계약) 중 어느 쪽인지
-        expected = 3 if ref_col_count == 3 else (5 if ref_col_count == 5 else ref_col_count)
+    # CHECK 4: output docx 귀책 표 컬럼 수 (3=지방계약/민간, 5=국가계약)
+    if out_acc_table and out_acc_table[0]:
+        col_count = len(out_acc_table[0])
+        ok4 = col_count in (3, 5)
         checks.append(_check_item(
-            f"귀책 표 컬럼 수 ({ref_col_count}컬럼)",
-            True,
-            f"reference 기준 {ref_col_count}컬럼"
+            f"output docx 귀책 표 컬럼 수 ({col_count}컬럼)",
+            ok4,
+            f"{'지방계약/민간' if col_count == 3 else ('국가계약' if col_count == 5 else '비표준')} 형식"
+            if ok4 else f"예상 외 컬럼 수: {col_count}"
         ))
     else:
-        checks.append(_check_item("귀책 표 컬럼 수", None, "reference 귀책 표 미발견"))  # type: ignore
+        checks.append(_check_item("output docx 귀책 표 컬럼 수", None, "귀책 표 미발견"))  # type: ignore
 
     # CHECK 5: 필수 섹션 존재 여부 (data.json 기준)
     req_fields = {
