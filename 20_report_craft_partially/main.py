@@ -838,11 +838,40 @@ def _compare_one(project_dir: Path, ref_path: Path) -> dict:
                 "reference 텍스트 추출 실패 (스캔 PDF 또는 추출 오류) — 수동 확인 필요"
             ))
         else:
-            checks.append(_check_item(
-                f"total_delay_days({total_dd}일) — reference에 등장",
-                found_in_ref,
-                "" if found_in_ref else f"reference에서 '{total_dd}일' 미발견 (분산 기재 또는 reference 불일치 가능)"
-            ))
+            if found_in_ref:
+                checks.append(_check_item(
+                    f"total_delay_days({total_dd}일) — reference에 등장",
+                    True, ""
+                ))
+            else:
+                # 차수별 분리 기재 패턴 확인 (예: 14차 184일 + 15차 184일 → 합계 368일)
+                # accountability_diagram 행별 delay_days가 각각 reference에 나타나면 warning으로 격하
+                diag_tmp = data.get("accountability_diagram", [])
+                diag_days_tmp = [r.get("delay_days", 0) for r in diag_tmp
+                                 if isinstance(r, dict) and r.get("delay_days", 0) > 0]
+                diag_sum_tmp = sum(diag_days_tmp)
+                all_parts_in_ref = (
+                    diag_sum_tmp == total_dd
+                    and len(diag_days_tmp) > 1
+                    and all(
+                        bool(_re.search(str(d) + r"\s*일", ref_text))
+                        or bool(_re.search(r"일\s*" + str(d), ref_text))
+                        for d in diag_days_tmp
+                    )
+                )
+                if all_parts_in_ref:
+                    checks.append(_check_item(
+                        f"total_delay_days({total_dd}일) — reference에 등장",
+                        None,  # warning: 합산값은 없지만 개별 일수는 있음
+                        f"'{total_dd}일' 직접 미발견 — 차수별 분리 기재로 추정 "
+                        f"({'+'.join(str(d) for d in diag_days_tmp)}={total_dd}), 수동 확인 권장"
+                    ))
+                else:
+                    checks.append(_check_item(
+                        f"total_delay_days({total_dd}일) — reference에 등장",
+                        False,
+                        f"reference에서 '{total_dd}일' 미발견 (분산 기재 또는 reference 불일치 가능)"
+                    ))
     else:
         checks.append(_check_item("total_delay_days 설정 여부", False, "data.json에 total_delay_days 없음"))
 
