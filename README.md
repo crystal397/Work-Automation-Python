@@ -80,7 +80,8 @@ python work/
 │   ├── build.py
 │   ├── collector.py
 │   ├── config.py
-│   ├── gui.py                  ← GUI 주 실행 파일
+│   ├── flags.py                ← 작업불가일 플래그 정의 단일 소스
+│   ├── gui.py                  ← GUI 주 실행 파일 (customtkinter)
 │   ├── kma_client.py
 │   ├── main.py
 │   ├── scheduler.py
@@ -385,23 +386,26 @@ python pdf_invoice_extractor_and_excel_filler.py
 
 ### 10. 기상청 ASOS 기상 데이터 수집
 
-건설현장 좌표 기반으로 가장 가까운 ASOS 기상관측소를 자동 탐색하여 기상 데이터 수집 및 공종별 작업불가일 산정.
+건설현장 좌표 기반으로 가장 가까운 ASOS 기상관측소를 자동 탐색하여 기상 데이터 수집 및 공종별 작업불가일 산정. 비개발자도 `.exe`로 바로 사용 가능한 GUI 포함.
 
-- 전국 727개 ASOS 관측소 중 Haversine 거리 최근접 탐색
+- 전국 727개 ASOS 관측소 중 Haversine 거리 최근접 탐색 + ASOS 유효성 자동 검증
 - 수집 항목: 기온(최고/최저), 강수량, 풍속(평균/최대), 순간최대풍속, 신적설, 습도, 일조시간, 지면온도, 증발량
-- 공사중지 플래그 자동 계산 (강수 10mm+ / 풍속 14m/s+ / 크레인 10m/s+ / 적설 1cm+ / 폭염 35°C+ / 혹한 -10°C- / 지면동결 / 안개 등 12종)
+- 작업불가일 플래그 12종 (강수·강풍·크레인풍속·적설·폭염·한파·지면동결·일조부족·증발과다·강수유무·강설유무·안개)
+- **공종별 판정 기준값 사용자 직접 설정** — 토공사·RC·타워크레인 등 6개 프리셋 또는 직접 입력, 기준값(예: 강수 5mm↑)도 공종마다 개별 조정 가능
 - `sites.json`에 현장별 위도·경도·수집기간 및 공종별 작업 기간(`works`) 설정 (`sites.example.json` 참고)
-- `analyzer.py`로 공종별 작업불가일 산정 → 현장별 엑셀 출력 (`{site_id}_작업불가일.xlsx`)
+- 공종별 작업불가일 산정 → 현장별 엑셀 출력 (`{site_id}_작업불가일.xlsx`), 요약·공종별 상세 시트 + 서식 자동 적용
 - APScheduler로 매일 오전 6시 자동 수집
 - SQLite 저장
 
 ```bash
+python gui.py          # GUI 실행 (5단계 wizard, sites.json 일괄 수집 포함) ← 권장
+python main.py         # CLI 대화형 실행
 python collector.py    # 전체 기간 수집 (sites.json의 start ~ end 기준)
 python analyzer.py     # 공종별 작업불가일 산정 및 엑셀 출력
 python scheduler.py    # 매일 6시 자동 수집 데몬 실행
 ```
 
-**의존성**: requests, sqlalchemy, apscheduler, pandas, openpyxl
+**의존성**: requests, sqlalchemy, apscheduler, pandas, openpyxl, customtkinter
 **API**: 기상청 ASOS
 
 ---
@@ -583,7 +587,7 @@ python land_price_lookup.py # 공시지가 조회
 | OCR | pytesseract, pdf2image |
 | 데이터베이스 | SQLite3, SQLAlchemy |
 | 스케줄링 | APScheduler |
-| GUI | Tkinter |
+| GUI | Tkinter, customtkinter |
 | 배포 | PyInstaller |
 | 진행 표시 | tqdm |
 | 외부 API | 카카오 로컬, 국토부 실거래가, 행안부 도로명주소, 기상청 ASOS |
