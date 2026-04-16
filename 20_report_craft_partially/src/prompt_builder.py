@@ -1,14 +1,14 @@
 """
-claude.ai 에 붙여넣을 귀책분석 작성 프롬프트를 생성.
+귀책분석 작성 지시서(prompt_for_claude.md)를 생성.
 
 입력:
-  output/reference_patterns.md  — learn 단계 결과
+  output/reference_patterns.md   — learn 단계 결과
   output/correspondence_texts.md — scan 단계 결과 (전문)
-  output/scan_result.json        — 공문 목록 (편집된 것)
+  output/scan_result.json        — 공문 목록
 
 출력:
-  output/prompt_for_claude.md   — claude.ai에 그대로 복사·붙여넣기
-  output/귀책분석_schema.json   — generate 단계 JSON 스키마 (claude.ai가 채울 형식)
+  output/prompt_for_claude.md    — Claude Code가 Read 도구로 읽고 귀책분석_data.json 직접 생성
+  output/귀책분석_schema.json    — generate 단계 JSON 스키마
 """
 
 from __future__ import annotations
