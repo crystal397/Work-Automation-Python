@@ -526,7 +526,13 @@ def cmd_validate(project_name: str | None, _stop_on_error: bool = True) -> bool:
     # ── [오류/경고] detail_narratives 소결 누락 ─────────────────────
     # 결론 문구는 계약 유형 무관하게 동일 → hard_error
     # 조항 인용은 민간계약 등 비표준 조항 가능 → soft_warning
-    _SOGYEOL_CONCLUSION = "계약상대자의 책임 없는 사유"
+    # 공백 유무("책임없는" vs "책임 없는") 등 변형 허용
+    _SOGYEOL_VARIANTS = [
+        "계약상대자의 책임 없는 사유",
+        "계약상대자의 책임없는 사유",
+        "계약상대자의 책임이 없는 사유",
+        "계약상대자 책임 없는 사유",
+    ]
     _SOGYEOL_CLAUSE_KW  = [
         "제8절", "제22조", "제25조", "제26조", "제27조", "제74조",
         "일반조건", "계약조건", "해당 조항", "계약 조항",
@@ -541,7 +547,7 @@ def cmd_validate(project_name: str | None, _stop_on_error: bool = True) -> bool:
                 continue
             block_title = block.get("title") or block.get("label", f"[{i}]")
             paras_text = " ".join(str(p) for p in paras)
-            if _SOGYEOL_CONCLUSION not in paras_text:
+            if not any(v in paras_text for v in _SOGYEOL_VARIANTS):
                 hard_errors.append(
                     f"  [오류] detail_narratives '{block_title}' 블록에 소결 결론이 없습니다.\n"
                     f"     마지막 단락에 \"계약상대자의 책임 없는 사유에 해당합니다\"를 포함시키세요."

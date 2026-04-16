@@ -188,7 +188,12 @@ def learn_all(reference_dir: Path, output_dir: Path) -> Path:
         if key not in seen:
             seen.add(key)
             unique_files.append(f)
-    all_files = sorted(unique_files)
+    # 템플릿 파일 제외 (remember.md: 보고서_템플릿_* 3개는 분석 대상 제외)
+    _TEMPLATE_KW = ("템플릿", "비용산정기준", "template", "Template")
+    all_files = sorted(
+        f for f in unique_files
+        if not any(kw in f.name for kw in _TEMPLATE_KW)
+    )
 
     if not all_files:
         print(f"[오류] reference 폴더에 docx/pdf 파일이 없습니다: {reference_dir}")
