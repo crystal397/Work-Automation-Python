@@ -221,23 +221,33 @@ def _mtime(path: Path) -> float:
         return 0.0
 
 
+# Pass 3 로직이 변경될 때마다 이 값을 올린다 → 이전 캐시 자동 무효화
+_CACHE_VERSION = 2  # v2: Pass 3에서 subject+파일명 검색 추가 (2026-04-16)
+
+
 def _load_cache(cache_path: Path) -> dict[str, dict]:
     """
-    캐시 파일 로드.
+    캐시 파일 로드. _CACHE_VERSION 불일치 시 빈 캐시 반환 (전체 재스캔).
     키: 절대 파일 경로 문자열
     값: to_dict() 결과 + mtime
     """
     if not cache_path.exists():
         return {}
     try:
-        return json.loads(cache_path.read_text(encoding="utf-8"))
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        if data.get("__version__") != _CACHE_VERSION:
+            print(f"  [캐시] 버전 불일치 (저장={data.get('__version__')} / 현재={_CACHE_VERSION}) → 전체 재스캔")
+            return {}
+        return {k: v for k, v in data.items() if k != "__version__"}
     except Exception:
         return {}
 
 
 def _save_cache(cache_path: Path, cache: dict[str, dict]):
+    data = {"__version__": _CACHE_VERSION}
+    data.update(cache)
     cache_path.write_text(
-        json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
 
@@ -261,6 +271,7 @@ def _cache_hit(cache: dict[str, dict], file_path: Path) -> CorrespondenceItem | 
 _FOLDER_KW_LOWER    = [kw.lower() for kw in config.CORRESPONDENCE_FOLDER_KEYWORDS]
 _SKIP_KW_LOWER      = [kw.lower() for kw in config.SKIP_FOLDER_KEYWORDS]
 _RELEVANCE_KW_LOWER = [kw.lower() for kw in config.RELEVANCE_KEYWORDS]
+_BORDERLINE_NEG_KW_LOWER = [kw.lower() for kw in config.BORDERLINE_NEGATIVE_KEYWORDS]
 
 _SCAN_SUPPORTED_EXTS = frozenset({
     ".docx", ".pdf", ".hwp", ".hwpx",
@@ -382,6 +393,15 @@ def _pass2_check(
 
 # ── 공통 유틸 ────────────────────────────────────────────────────────────────────
 
+def _is_under(file_path: Path, directory: Path) -> bool:
+    """file_path 가 directory 하위에 있는지 확인."""
+    try:
+        file_path.relative_to(directory)
+        return True
+    except ValueError:
+        return False
+
+
 def _display_path(file_path: Path, vendor_dirs: list[Path]) -> str:
     """파일 경로를 vendor_dirs 중 하나를 기준으로 상대경로로 반환."""
     for vd in vendor_dirs:
@@ -396,16 +416,71 @@ def _display_path(file_path: Path, vendor_dirs: list[Path]) -> str:
 
 def _pass3_relevance(item: CorrespondenceItem, full_text: str) -> tuple[bool, list[str]]:
     """
-    공문 전문에서 귀책분석 관련 키워드가 있는지 확인.
+    공문 전문 + 제목 + 파일명에서 귀책분석 관련 키워드 확인.
+    전문 OCR 추출이 실패해도 제목/파일명으로 관련성 판단 가능.
     반환: (관련여부, 매칭된 키워드 목록)
     """
+    # 전문(全文) 검색
     text_lower = full_text.lower()
-    matched = [
+    matched_set: set[str] = {
         config.RELEVANCE_KEYWORDS[i]
         for i, kw in enumerate(_RELEVANCE_KW_LOWER)
         if kw in text_lower
-    ]
+    }
+
+    # 제목 + 파일명 보조 검색 (OCR 품질 불량 시 보완)
+    title_lower = (item.subject + " " + item.file_path.stem).lower()
+    for kw_orig, kw_lo in zip(config.RELEVANCE_KEYWORDS, _RELEVANCE_KW_LOWER):
+        if kw_lo in title_lower:
+            matched_set.add(kw_orig)
+
+    matched = sorted(matched_set, key=lambda k: config.RELEVANCE_KEYWORDS.index(k))
     return bool(matched), matched
+
+
+def _reclassify_borderline(
+    items: list[CorrespondenceItem],
+) -> tuple[list[CorrespondenceItem], list[CorrespondenceItem], list[CorrespondenceItem]]:
+    """
+    borderline 항목을 제목·파일명 기준으로 재분류.
+
+    - promoted      : RELEVANCE_KEYWORDS 제목 매칭 → confirmed 승격
+    - remaining     : 판단 불가 → borderline 유지
+    - auto_excluded : BORDERLINE_NEGATIVE_KEYWORDS 매칭 → scan_result.json 제외
+
+    이 함수는 _pass3_relevance 에서 이미 전문·제목 검사를 모두 통과하지 못한
+    항목만 인수로 받아야 합니다. (promoted 케이스 대부분은 Pass 3 개선으로 흡수됨)
+    BORDERLINE_NEGATIVE_KEYWORDS 를 이용한 명확한 무관 항목만 자동 제외합니다.
+    """
+    promoted: list[CorrespondenceItem] = []
+    remaining: list[CorrespondenceItem] = []
+    auto_excluded: list[CorrespondenceItem] = []
+
+    for it in items:
+        # 제목·파일명 소문자화 (폴더 경로 일부도 포함)
+        check = (it.subject + " " + it.file_path.stem + " "
+                 + " ".join(it.file_path.parts[-3:])).lower()
+
+        # ── 긍정 재검사: RELEVANCE_KEYWORDS 가 제목에 있으면 confirmed 승격 ────
+        rel_matched = [
+            kw_orig for kw_orig, kw_lo in zip(config.RELEVANCE_KEYWORDS, _RELEVANCE_KW_LOWER)
+            if kw_lo in check
+        ]
+        if rel_matched:
+            it.matched_keywords = rel_matched
+            it.is_relevant = True
+            it.borderline = False
+            promoted.append(it)
+            continue
+
+        # ── 부정 재검사: BORDERLINE_NEGATIVE_KEYWORDS 매칭 → 자동 제외 ─────────
+        if any(nk in check for nk in _BORDERLINE_NEG_KW_LOWER):
+            auto_excluded.append(it)
+            continue
+
+        remaining.append(it)
+
+    return promoted, remaining, auto_excluded
 
 
 # ── 단일 폴더 스캔 (내부용) ────────────────────────────────────────────────────
@@ -539,6 +614,13 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
     vendor_dirs: 스캔할 폴더 경로 목록 (1개 이상)
     반환: 편집 가능한 scan_result.json 경로
     """
+    # GUI 모드(동일 프로세스 반복 실행) 시 config 변경이 반영되도록 키워드 갱신
+    global _FOLDER_KW_LOWER, _SKIP_KW_LOWER, _RELEVANCE_KW_LOWER, _BORDERLINE_NEG_KW_LOWER
+    _FOLDER_KW_LOWER       = [kw.lower() for kw in config.CORRESPONDENCE_FOLDER_KEYWORDS]
+    _SKIP_KW_LOWER         = [kw.lower() for kw in config.SKIP_FOLDER_KEYWORDS]
+    _RELEVANCE_KW_LOWER    = [kw.lower() for kw in config.RELEVANCE_KEYWORDS]
+    _BORDERLINE_NEG_KW_LOWER = [kw.lower() for kw in config.BORDERLINE_NEGATIVE_KEYWORDS]
+
     output_dir.mkdir(parents=True, exist_ok=True)
     vendor_dirs = [d.resolve() for d in vendor_dirs]
 
@@ -607,13 +689,43 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
     all_relevant.sort(key=_sort_key)
     all_borderline.sort(key=_sort_key)
 
+    # ── borderline 자동 재분류 ─────────────────────────────────────────────────
+    promoted, all_borderline, auto_excluded = _reclassify_borderline(all_borderline)
+    all_relevant.extend(promoted)
+    all_relevant.sort(key=_sort_key)
+
+    if promoted:
+        print(f"  [재분류] borderline → confirmed 승격: {len(promoted)}개 (제목 키워드 매칭)")
+    if auto_excluded:
+        print(f"  [재분류] 자동 제외: {len(auto_excluded)}개 (BORDERLINE_NEGATIVE_KEYWORDS 매칭)")
+
+    # per_dir_stats 소급 보정: 재분류 결과 반영
+    # (per_dir_stats는 각 디렉터리 스캔 직후 수집되어 promoted/auto_excluded 미반영)
+    promoted_set = {i.file_path for i in promoted}
+    excluded_set = {i.file_path for i in auto_excluded}
+    for stat in per_dir_stats:
+        stat_dir = Path(stat["dir"])
+        stat_promoted = sum(
+            1 for fp in promoted_set
+            if _is_under(fp, stat_dir)
+        )
+        stat_excluded = sum(
+            1 for fp in excluded_set
+            if _is_under(fp, stat_dir)
+        )
+        stat["relevant_confirmed"] += stat_promoted
+        stat["borderline"] -= (stat_promoted + stat_excluded)
+        stat["auto_excluded"] = stat_excluded
+
     pct = len(all_relevant) / max(total_files_all, 1) * 100
     print(f"\n[합산 결과]")
     print(f"  전체 파일:      {total_files_all}개")
     print(f"  공문 확인:      {len(all_correspondence)}개")
     print(f"  포함 확정:      {len(all_relevant)}개 (전체 대비 {pct:.1f}%)")
-    print(f"  경계선 검토:    {len(all_borderline)}개  ← scan_borderline.md 확인")
-    print(f"  명확히 제외:    {len(all_correspondence) - len(all_relevant) - len(all_borderline)}개")
+    print(f"    (승격 포함:   {len(promoted)}개 제목 매칭으로 확정)")
+    print(f"  수동 검토 필요: {len(all_borderline)}개  ← scan_borderline.md 확인")
+    print(f"  자동 제외:      {len(auto_excluded)}개  ← scan_borderline.md 하단 참조")
+    print(f"  명확히 제외:    {len(all_correspondence) - len(all_relevant) - len(all_borderline) - len(auto_excluded)}개")
 
     # 폴더 트리 저장
     (output_dir / "scan_folder_tree.md").write_text(
@@ -625,15 +737,23 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
     print(f"  캐시 저장: {len(cache)}개 항목 → {cache_path.name}")
 
     # ── 결과 저장 ──────────────────────────────────────────────────────────────
-    # confirmed 항목 + borderline 항목을 모두 scan_result.json에 포함
-    # relevance 필드로 구분: "confirmed" | "borderline"
+    # confirmed + borderline 을 scan_result.json 에 포함
+    # relevance 필드: "confirmed" | "confirmed-by-title" | "borderline"
     def _with_relevance(item: CorrespondenceItem, relevance: str) -> dict:
         d = item.to_dict()
         d["relevance"] = relevance
         return d
 
+    # promoted 항목에는 "confirmed-by-title" 태그 부여 (추적용)
+    promoted_paths = {i.file_path for i in promoted}
+
+    def _relevance_tag(item: CorrespondenceItem) -> str:
+        if item.file_path in promoted_paths:
+            return "confirmed-by-title"
+        return "confirmed"
+
     all_items_combined = (
-        [_with_relevance(i, "confirmed") for i in all_relevant] +
+        [_with_relevance(i, _relevance_tag(i)) for i in all_relevant] +
         [_with_relevance(i, "borderline") for i in all_borderline]
     )
     # 날짜 기준 재정렬 (confirmed/borderline 혼합 후 정렬)
@@ -642,13 +762,19 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
         return raw if len(raw) >= 8 else "99999999"
     all_items_combined.sort(key=_sort_key_d)
 
+    # scan_no 부여: Claude가 data.json items에 복사할 번호 (1-based)
+    for idx, item_dict in enumerate(all_items_combined, 1):
+        item_dict["no"] = idx
+
     result_data = {
         "vendor_dirs": [str(d) for d in vendor_dirs],
         "stats": {
             "total_files": total_files_all,
             "correspondence_found": len(all_correspondence),
             "relevant_confirmed": len(all_relevant),
-            "borderline_auto_included": len(all_borderline),
+            "promoted_by_title": len(promoted),
+            "borderline_remaining": len(all_borderline),
+            "auto_excluded": len(auto_excluded),
             "relevant_pct": round(pct, 1),
             "failed_reads": all_failed,
             "per_dir": per_dir_stats,
@@ -670,9 +796,12 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
         f"- 전체 파일 수: {total_files_all}개",
         f"- 공문 확인 파일: {len(all_correspondence)}개",
         f"- 포함 확정(귀책 키워드 매칭): **{len(all_relevant)}개** (전체 대비 {pct:.1f}%)",
-        f"- 참고 항목(키워드 미매칭, 자동 포함): **{len(all_borderline)}개** → scan_borderline.md 참조",
-        f"  ※ 참고 항목도 scan_result.json에 자동 포함됩니다. 불필요한 항목은 scan_result.json에서 삭제하세요.",
-        f"- 명확히 제외:    {len(all_correspondence) - len(all_relevant) - len(all_borderline)}개",
+        f"  - 전문(全文) 매칭: {len(all_relevant) - len(promoted)}개",
+        f"  - 제목·파일명 매칭(승격): {len(promoted)}개",
+        f"- 수동 검토 필요(키워드 미매칭): **{len(all_borderline)}개** → scan_borderline.md 참조",
+        f"  ※ 수동 검토 항목도 scan_result.json에 포함됩니다. 불필요한 항목은 삭제하세요.",
+        f"- 자동 제외(무관 키워드 매칭): **{len(auto_excluded)}개** → scan_borderline.md 하단 참조",
+        f"- 명확히 제외: {len(all_correspondence) - len(all_relevant) - len(all_borderline) - len(auto_excluded)}개",
         "",
     ]
     # 경로별 소계
@@ -705,16 +834,21 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
             *[f"- {f}" for f in all_failed],
             "",
         ]
+    # file_path → scan_no 맵: scan_result.json의 실제 번호와 일치하도록
+    _path_to_scanno: dict[str, int] = {d["file_path"]: d["no"] for d in all_items_combined}
+
     summary_lines += [
         "## 관련 공문 목록 — 발신일자순",
         "",
+        "※ No 컬럼은 scan_result.json의 scan_no와 동일합니다. Claude에게 전달할 때 그대로 사용하세요.",
         "※ 발신일자 뒤 `⚠️(OCR:날짜)` 표시는 파일명 날짜와 OCR 추출 날짜가 다름을 의미합니다.",
         "  → 파일명 날짜가 적용되었습니다. 공문번호·발신처도 확인이 필요할 수 있습니다.",
         "",
         "| No | 발신일자 | 공문번호 | 발신처 | 수신처 | 제목 | 핵심내용 | 파일경로 |",
         "|-----|---------|---------|--------|--------|------|---------|---------|",
     ]
-    for no, item in enumerate(all_relevant, 1):
+    for item in all_relevant:
+        no = _path_to_scanno.get(str(item.file_path), "?")
         display_path = _display_path(item.file_path, vendor_dirs)
         # 파일명 날짜와 OCR 날짜가 다르면 경고 표시 (공문번호·발신처도 확인 필요)
         date_display = item.date
@@ -738,28 +872,62 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
         "\n".join(summary_lines), encoding="utf-8"
     )
 
-    # scan_borderline.md — 참고 항목 목록 (이미 scan_result.json에 포함됨)
+    # scan_borderline.md — 수동 검토 필요 항목 + 자동 제외 항목 목록
     borderline_lines = [
-        "# 참고 항목 목록 — 이미 scan_result.json에 포함됨",
+        "# 경계선 공문 검토 목록",
+        "",
+        "## 수동 검토 필요 항목 (scan_result.json에 포함됨)",
         "",
         "귀책 키워드 미매칭이지만 공문 형식을 갖춘 파일 목록입니다.",
         "**이 항목들은 scan_result.json에 자동 포함되어 있습니다.**",
-        "귀책분석와 명백히 무관한 항목(경력증명서, 보증수수료 영수증 등)만 scan_result.json에서 삭제하세요.",
-        "나머지는 그냥 두면 됩니다.",
+        "귀책분석와 명백히 무관한 항목만 scan_result.json에서 직접 삭제하세요.",
         "",
         f"총 {len(all_borderline)}개",
         "",
+    ]
+    if all_borderline:
+        borderline_lines += [
+            "| No | 발신일자 | 공문번호 | 발신처 | 수신처 | 제목 | 파일경로 |",
+            "|----|---------|---------|--------|--------|------|---------|",
+        ]
+        for no, item in enumerate(all_borderline, 1):
+            display_path = _display_path(item.file_path, vendor_dirs)
+            borderline_lines.append(
+                f"| {no} | {item.date} | {item.doc_number} | {item.sender} | "
+                f"{item.receiver} | {item.subject} | {display_path} |"
+            )
+    else:
+        borderline_lines.append("_(없음)_")
+
+    # 자동 제외 항목 섹션
+    borderline_lines += [
+        "",
         "---",
         "",
-        "| No | 발신일자 | 공문번호 | 발신처 | 수신처 | 제목 | 파일경로 |",
-        "|----|---------|---------|--------|--------|------|---------|",
+        "## 자동 제외 항목 (scan_result.json에서 제외됨)",
+        "",
+        "BORDERLINE_NEGATIVE_KEYWORDS(식대·요금고지서 등) 매칭으로 자동 제외된 항목입니다.",
+        "scan_result.json에 포함되지 않습니다.",
+        "잘못 제외된 항목이 있으면 scan_result.json에 수동으로 추가하거나",
+        "config.py의 BORDERLINE_NEGATIVE_KEYWORDS 에서 해당 키워드를 제거하세요.",
+        "",
+        f"총 {len(auto_excluded)}개",
+        "",
     ]
-    for no, item in enumerate(all_borderline, 1):
-        display_path = _display_path(item.file_path, vendor_dirs)
-        borderline_lines.append(
-            f"| {no} | {item.date} | {item.doc_number} | {item.sender} | "
-            f"{item.receiver} | {item.subject} | {display_path} |"
-        )
+    if auto_excluded:
+        borderline_lines += [
+            "| No | 발신일자 | 공문번호 | 발신처 | 수신처 | 제목 | 파일경로 |",
+            "|----|---------|---------|--------|--------|------|---------|",
+        ]
+        for no, item in enumerate(auto_excluded, 1):
+            display_path = _display_path(item.file_path, vendor_dirs)
+            borderline_lines.append(
+                f"| {no} | {item.date} | {item.doc_number} | {item.sender} | "
+                f"{item.receiver} | {item.subject} | {display_path} |"
+            )
+    else:
+        borderline_lines.append("_(없음)_")
+
     (output_dir / "scan_borderline.md").write_text(
         "\n".join(borderline_lines), encoding="utf-8"
     )
@@ -813,9 +981,7 @@ def scan(vendor_dirs: list[Path], output_dir: Path) -> Path:
 
     print(f"\n저장 완료:")
     print(f"  - {output_dir / 'scan_summary.md'}")
-    print(f"  - {output_dir / 'scan_borderline.md'}  <- 참고 항목 ({len(all_borderline)}개) — scan_result.json에 이미 포함됨")
-    print(f"  - {output_dir / 'scan_summary.md'}")
-    print(f"  - {output_dir / 'scan_borderline.md'}  ← 참고 항목 ({len(all_borderline)}개) — 이미 scan_result.json에 포함됨")
+    print(f"  - {output_dir / 'scan_borderline.md'}  ← 수동 검토 {len(all_borderline)}개 / 자동 제외 {len(auto_excluded)}개")
     print(f"  - {output_dir / 'scan_result.json'}  ← 불필요 항목 삭제 후 prepare 실행 (편집 생략 가능)")
     print(f"  - {output_dir / 'scan_folder_tree.md'}")
     print(f"  - {output_dir / 'correspondence_texts.md'}")

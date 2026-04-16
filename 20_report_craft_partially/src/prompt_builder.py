@@ -14,6 +14,7 @@ claude.ai 에 붙여넣을 귀책분석 작성 프롬프트를 생성.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import sys
@@ -285,8 +286,12 @@ def build(output_dir: Path, project_name: str = "") -> Path:
     ref_path_found = next((p for p in _ref_candidates if p.exists()), None)
     if ref_path_found:
         ref_text = ref_path_found.read_text(encoding="utf-8")
+        # 파일 내 "처리 완료: N개" 패턴에서 실제 파일 수 추출
+        _ref_count_m = re.search(r"처리 완료:\s*(\d+)개", ref_text)
+        ref_file_count = int(_ref_count_m.group(1)) if _ref_count_m else ref_text.count("\n## ")
     else:
         ref_text = ""
+        ref_file_count = 0
         print("  ⚠️  reference_patterns.md 없음 — 참고 패턴 없이 프롬프트를 생성합니다.")
 
     corr_text = corr_texts_path.read_text(encoding="utf-8")
@@ -368,7 +373,7 @@ def build(output_dir: Path, project_name: str = "") -> Path:
         "",
         "## [REFERENCE 보고서 패턴]",
         "",
-        "(아래는 실제 귀책분석 보고서 13개에서 추출한 패턴입니다.",
+        f"(아래는 실제 귀책분석 보고서 {ref_file_count}개에서 추출한 패턴입니다.",
         "표 구조, 문체, 귀책 판단 방식, 공문 인용 방식을 학습하세요.)",
         "",
         ref_text,
@@ -403,7 +408,13 @@ def build(output_dir: Path, project_name: str = "") -> Path:
         # 마지막 2단계 경로 표시 (상위폴더\파일명) — 발신 방향·맥락 파악에 활용
         parts = fp.replace('\\', '/').split('/')
         source_display = '/'.join(parts[-2:]) if len(parts) >= 2 else fp
-        relevance_label = " (참고)" if item.get('relevance') == 'borderline' else ""
+        rel = item.get('relevance', 'confirmed')
+        if rel == 'borderline':
+            relevance_label = " (참고—키워드미매칭)"
+        elif rel == 'confirmed-by-title':
+            relevance_label = " (제목매칭)"
+        else:
+            relevance_label = ""
         prompt_lines.append(
             f"| {item.get('no', '')} | {item.get('date', '')}{relevance_label} | "
             f"{item.get('doc_number', '')} | {item.get('sender', '')} | "
