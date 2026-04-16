@@ -41,58 +41,60 @@ def init_db():
         conn.commit()
 
 
+_UPSERT_SQL = text("""
+    INSERT INTO weather_daily (
+        site_id, date, station_code,
+        temp_max, temp_min, precipitation,
+        wind_avg, wind_max, max_ins_wind,
+        snow_depth, humidity_avg, sunshine_hours,
+        ground_temp, evaporation, pressure,
+        is_rain_day, is_wind_day, is_wind_crane,
+        is_snow_day, is_heat_day, is_cold_day,
+        is_no_sunshine, is_freeze_day, is_high_evap_day,
+        rain_yn, snow_yn, fog_yn
+    ) VALUES (
+        :site_id, :date, :station_code,
+        :temp_max, :temp_min, :precipitation,
+        :wind_avg, :wind_max, :max_ins_wind,
+        :snow_depth, :humidity_avg, :sunshine_hours,
+        :ground_temp, :evaporation, :pressure,
+        :is_rain_day, :is_wind_day, :is_wind_crane,
+        :is_snow_day, :is_heat_day, :is_cold_day,
+        :is_no_sunshine, :is_freeze_day, :is_high_evap_day,
+        :rain_yn, :snow_yn, :fog_yn
+    )
+    ON CONFLICT(site_id, date) DO UPDATE SET
+        temp_max         = excluded.temp_max,
+        temp_min         = excluded.temp_min,
+        precipitation    = excluded.precipitation,
+        wind_avg         = excluded.wind_avg,
+        wind_max         = excluded.wind_max,
+        max_ins_wind     = excluded.max_ins_wind,
+        snow_depth       = excluded.snow_depth,
+        humidity_avg     = excluded.humidity_avg,
+        sunshine_hours   = excluded.sunshine_hours,
+        ground_temp      = excluded.ground_temp,
+        evaporation      = excluded.evaporation,
+        pressure         = excluded.pressure,
+        is_rain_day      = excluded.is_rain_day,
+        is_wind_day      = excluded.is_wind_day,
+        is_wind_crane    = excluded.is_wind_crane,
+        is_snow_day      = excluded.is_snow_day,
+        is_heat_day      = excluded.is_heat_day,
+        is_cold_day      = excluded.is_cold_day,
+        is_no_sunshine   = excluded.is_no_sunshine,
+        is_freeze_day    = excluded.is_freeze_day,
+        is_high_evap_day = excluded.is_high_evap_day,
+        rain_yn          = excluded.rain_yn,
+        snow_yn          = excluded.snow_yn,
+        fog_yn           = excluded.fog_yn
+""")
+
+
 def upsert_weather(records: list[dict]):
     if not records:
         return
     with engine.connect() as conn:
-        for r in records:
-            conn.execute(text("""
-                INSERT INTO weather_daily (
-                    site_id, date, station_code,
-                    temp_max, temp_min, precipitation,
-                    wind_avg, wind_max, max_ins_wind,
-                    snow_depth, humidity_avg, sunshine_hours,
-                    ground_temp, evaporation, pressure,
-                    is_rain_day, is_wind_day, is_wind_crane,
-                    is_snow_day, is_heat_day, is_cold_day,
-                    is_no_sunshine, is_freeze_day, is_high_evap_day,
-                    rain_yn, snow_yn, fog_yn
-                ) VALUES (
-                    :site_id, :date, :station_code,
-                    :temp_max, :temp_min, :precipitation,
-                    :wind_avg, :wind_max, :max_ins_wind,
-                    :snow_depth, :humidity_avg, :sunshine_hours,
-                    :ground_temp, :evaporation, :pressure,
-                    :is_rain_day, :is_wind_day, :is_wind_crane,
-                    :is_snow_day, :is_heat_day, :is_cold_day,
-                    :is_no_sunshine, :is_freeze_day, :is_high_evap_day,
-                    :rain_yn, :snow_yn, :fog_yn
-                )
-                ON CONFLICT(site_id, date) DO UPDATE SET
-                    temp_max         = excluded.temp_max,
-                    temp_min         = excluded.temp_min,
-                    precipitation    = excluded.precipitation,
-                    wind_avg         = excluded.wind_avg,
-                    wind_max         = excluded.wind_max,
-                    max_ins_wind     = excluded.max_ins_wind,
-                    snow_depth       = excluded.snow_depth,
-                    humidity_avg     = excluded.humidity_avg,
-                    sunshine_hours   = excluded.sunshine_hours,
-                    ground_temp      = excluded.ground_temp,
-                    evaporation      = excluded.evaporation,
-                    pressure         = excluded.pressure,
-                    is_rain_day      = excluded.is_rain_day,
-                    is_wind_day      = excluded.is_wind_day,
-                    is_wind_crane    = excluded.is_wind_crane,
-                    is_snow_day      = excluded.is_snow_day,
-                    is_heat_day      = excluded.is_heat_day,
-                    is_cold_day      = excluded.is_cold_day,
-                    is_no_sunshine   = excluded.is_no_sunshine,
-                    is_freeze_day    = excluded.is_freeze_day,
-                    is_high_evap_day = excluded.is_high_evap_day,
-                    rain_yn          = excluded.rain_yn,
-                    snow_yn          = excluded.snow_yn,
-                    fog_yn           = excluded.fog_yn
-            """), r)
+        conn.execute(_UPSERT_SQL, records)  # executemany (list 전달)
         conn.commit()
     print(f"[DB] {len(records)}건 저장 완료")

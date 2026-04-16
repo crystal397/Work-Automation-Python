@@ -732,16 +732,18 @@ ASOS_STATIONS = [
 ]
 
 
+def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """두 좌표 간 구면 거리 반환 (km, Haversine formula)"""
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1))
+         * math.cos(math.radians(lat2))
+         * math.sin(dlon / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
 def find_nearest_station(lat: float, lon: float) -> dict:
     """현장 좌표에서 가장 가까운 ASOS 관측소 반환"""
-    def haversine(s):
-        R = 6371
-        dlat = math.radians(s["lat"] - lat)
-        dlon = math.radians(s["lon"] - lon)
-        a = (math.sin(dlat/2)**2
-             + math.cos(math.radians(lat))
-             * math.cos(math.radians(s["lat"]))
-             * math.sin(dlon/2)**2)
-        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    return min(ASOS_STATIONS, key=haversine)
+    return min(ASOS_STATIONS, key=lambda s: haversine(lat, lon, s["lat"], s["lon"]))

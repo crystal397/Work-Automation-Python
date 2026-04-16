@@ -16,60 +16,13 @@ import sys
 import re
 from datetime import date, datetime
 
-from station_mapper import ASOS_STATIONS, find_nearest_station
+from station_mapper import ASOS_STATIONS, find_nearest_station, haversine
 from kma_client import fetch_daily_weather, parse_weather, validate_station
 from storage import init_db, upsert_weather
 from analyzer import summarize
-from config import KMA_API_KEY, BASE_DIR, DB_PATH
+from flags import FLAG_DEFS, FLAG_BY_ID, WORK_PRESET_ITEMS
 
-
-# ── 공종 프리셋 ──────────────────────────────────────────────
-WORK_PRESETS = {
-    "1": {
-        "name": "토공사",
-        "flags": ["is_rain_day", "is_snow_day", "is_freeze_day", "is_cold_day"],
-    },
-    "2": {
-        "name": "철근콘크리트공사",
-        "flags": ["is_rain_day", "is_heat_day", "is_cold_day",
-                  "is_freeze_day", "is_wind_day"],
-    },
-    "3": {
-        "name": "타워크레인작업",
-        "flags": ["is_wind_crane", "is_wind_day", "fog_yn"],
-    },
-    "4": {
-        "name": "도장·방수공사",
-        "flags": ["is_rain_day", "rain_yn", "is_no_sunshine",
-                  "is_cold_day", "is_freeze_day"],
-    },
-    "5": {
-        "name": "강구조물공사",
-        "flags": ["is_rain_day", "is_wind_day", "is_cold_day",
-                  "is_freeze_day", "is_heat_day"],
-    },
-    "6": {
-        "name": "포장공사",
-        "flags": ["is_rain_day", "is_snow_day", "is_freeze_day",
-                  "is_cold_day", "is_heat_day"],
-    },
-}
-
-# 플래그 전체 목록 (직접 선택용)
-ALL_FLAGS = {
-    "1":  ("is_rain_day",      "우천 (10mm 이상)"),
-    "2":  ("is_wind_day",      "강풍 (14m/s 이상)"),
-    "3":  ("is_wind_crane",    "크레인 제한 (순간 10m/s 이상)"),
-    "4":  ("is_snow_day",      "적설 (1cm 이상)"),
-    "5":  ("is_heat_day",      "폭염 (35℃ 이상)"),
-    "6":  ("is_cold_day",      "한파 (-10℃ 이하)"),
-    "7":  ("is_no_sunshine",   "일조 부족 (2시간 미만)"),
-    "8":  ("is_freeze_day",    "지면 동결 (0℃ 이하)"),
-    "9":  ("is_high_evap_day", "증발 과다 (10mm 이상)"),
-    "10": ("rain_yn",          "강수 유무 (소량 포함)"),
-    "11": ("snow_yn",          "강설 유무"),
-    "12": ("fog_yn",           "안개"),
-}
+_OP_SYM = {">=": "≥", "<=": "≤", "<": "<", ">": ">"}
 
 
 # ── 유틸리티 ─────────────────────────────────────────────────
@@ -95,18 +48,6 @@ def input_date(prompt: str) -> str:
         print("  ※ YYYY-MM-DD 형식으로 입력해 주세요. (예: 2024-01-01)")
 
 
-def haversine_km(lat1, lon1, lat2, lon2):
-    import math
-    R = 6371
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) ** 2
-         + math.cos(math.radians(lat1))
-         * math.cos(math.radians(lat2))
-         * math.sin(dlon / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
 # ── 관측소 선택 ──────────────────────────────────────────────
 
 def search_stations_by_name(keyword: str) -> list[dict]:
@@ -120,7 +61,7 @@ def show_station_list(stations: list[dict], lat=None, lon=None, max_show=20):
     for i, s in enumerate(stations[:max_show], 1):
         dist_str = ""
         if lat is not None and lon is not None:
-            dist = haversine_km(lat, lon, s["lat"], s["lon"])
+            dist = haversine(lat, lon, s["lat"], s["lon"])
             dist_str = f"  ({dist:.1f}km)"
         print(f"  {i:3d}) [{s['code']:>4s}] {s['name']:<12s}"
               f"  ({s['lat']:.4f}, {s['lon']:.4f}){dist_str}")
@@ -144,10 +85,10 @@ def select_station(lat: float = None, lon: float = None) -> dict:
         # 주변 5개
         ranked = sorted(
             ASOS_STATIONS,
-            key=lambda s: haversine_km(lat, lon, s["lat"], s["lon"])
+            key=lambda s: haversine(lat, lon, s["lat"], s["lon"])
         )[:5]
 
-        dist = haversine_km(lat, lon, nearest["lat"], nearest["lon"])
+        dist = haversine(lat, lon, nearest["lat"], nearest["lon"])
         print(f"\n  현장 좌표 ({lat}, {lon}) 기준 가장 가까운 관측소:")
         print(f"  → [{nearest['code']}] {nearest['name']} ({dist:.1f}km)\n")
         print("  주변 관측소 목록:")
@@ -218,30 +159,53 @@ def select_works(site_start: str, site_end: str) -> list[dict]:
     while True:
         print(f"\n  ── 공종 {len(works) + 1} ──")
         print("  프리셋 선택:")
-        for k, v in WORK_PRESETS.items():
-            flags_str = ", ".join(v["flags"][:3])
-            if len(v["flags"]) > 3:
+        for i, (name, flags) in enumerate(WORK_PRESET_ITEMS, 1):
+            flags_str = ", ".join(flags[:3])
+            if len(flags) > 3:
                 flags_str += " ..."
-            print(f"    {k}) {v['name']}  [{flags_str}]")
+            print(f"    {i}) {name}  [{flags_str}]")
         print(f"    0) 직접 입력")
 
         preset_choice = input_strip("\n  프리셋 번호 (Enter=직접입력) > ")
 
-        if preset_choice in WORK_PRESETS:
-            preset = WORK_PRESETS[preset_choice]
-            work_name = preset["name"]
-            work_flags = preset["flags"][:]
+        work_thresholds: dict = {}
+
+        preset_idx = (int(preset_choice) - 1
+                      if preset_choice.isdigit()
+                      and 1 <= int(preset_choice) <= len(WORK_PRESET_ITEMS)
+                      else None)
+
+        if preset_idx is not None:
+            work_name, work_flags = WORK_PRESET_ITEMS[preset_idx]
+            work_flags = work_flags[:]
             print(f"  → {work_name} 선택됨")
 
             # 플래그 수정 여부
             modify = input_strip("  플래그를 수정하시겠습니까? (y/N) > ")
             if modify.lower() == "y":
-                work_flags = select_flags(work_flags)
+                work_flags, work_thresholds = select_flags(work_flags)
+            else:
+                # 플래그는 유지, 기준값만 확인
+                print("\n  판정 기준값 설정 (Enter=기본값 유지):")
+                for flag_id in work_flags:
+                    if flag_id not in FLAG_BY_ID:
+                        continue
+                    _, label, col, op, default, unit = FLAG_BY_ID[flag_id]
+                    if col is None:
+                        continue
+                    val_str = input_strip(
+                        f"    {label:<10s} {_OP_SYM[op]} ? "
+                        f"(기본 {default}{unit}, Enter=유지) > "
+                    )
+                    try:
+                        work_thresholds[flag_id] = float(val_str)
+                    except ValueError:
+                        work_thresholds[flag_id] = default
         else:
             work_name = input_strip("  공종명 > ")
             if not work_name:
                 work_name = f"공종{len(works) + 1}"
-            work_flags = select_flags()
+            work_flags, work_thresholds = select_flags()
 
         # 기간 입력
         print(f"\n  '{work_name}' 작업 기간:")
@@ -252,15 +216,28 @@ def select_works(site_start: str, site_end: str) -> list[dict]:
         work_end = we_input if validate_date(we_input) else site_end
 
         work = {
-            "name": work_name,
-            "start": work_start,
-            "end": work_end,
-            "flags": work_flags,
+            "name":       work_name,
+            "start":      work_start,
+            "end":        work_end,
+            "flags":      work_flags,
+            "thresholds": work_thresholds,
         }
         works.append(work)
 
+        # 기준값 요약 출력
+        threshold_parts = []
+        for flag_id in work_flags:
+            if flag_id not in FLAG_BY_ID:
+                continue
+            _, label, col, op, default, unit = FLAG_BY_ID[flag_id]
+            if col is None:
+                threshold_parts.append(label)
+            else:
+                t = work_thresholds.get(flag_id, default)
+                threshold_parts.append(f"{label}({_OP_SYM[op]}{t}{unit})")
+
         print(f"\n  ✓ [{work_name}] {work_start} ~ {work_end}")
-        print(f"    플래그: {', '.join(work_flags)}")
+        print(f"    기준: {', '.join(threshold_parts)}")
 
         more = input_strip("\n  공종을 추가하시겠습니까? (Y/n) > ")
         if more.lower() == "n":
@@ -269,32 +246,53 @@ def select_works(site_start: str, site_end: str) -> list[dict]:
     return works
 
 
-def select_flags(defaults: list[str] = None) -> list[str]:
-    """플래그 선택 인터페이스"""
+def select_flags(defaults: list[str] = None) -> tuple[list[str], dict]:
+    """플래그 선택 + 수치 기준값 입력. (flags, thresholds) 반환"""
     print("\n  작업불가일 판정 플래그 선택:")
-    for k, (flag_id, label) in ALL_FLAGS.items():
+    for i, (flag_id, label, col, op, default, unit) in enumerate(FLAG_DEFS, 1):
         marker = " ✓" if defaults and flag_id in defaults else ""
-        print(f"    {k:>2s}) {label:<30s} ({flag_id}){marker}")
+        detail = f" ({_OP_SYM[op]}{default}{unit})" if col is not None else ""
+        print(f"    {i:>2d}) {label:<14s}{detail:<18s} ({flag_id}){marker}")
+
+    def _parse_nums(sel: str) -> list[str]:
+        result = []
+        for n in sel.split(","):
+            n = n.strip()
+            if n.isdigit() and 1 <= int(n) <= len(FLAG_DEFS):
+                result.append(FLAG_DEFS[int(n) - 1][0])
+        return result
 
     if defaults:
         print(f"\n  현재 선택: {', '.join(defaults)}")
         sel = input_strip("  번호를 쉼표로 입력 (Enter=현재 유지) > ")
-        if not sel:
-            return defaults
+        selected = defaults[:] if not sel else _parse_nums(sel)
     else:
         sel = input_strip("  번호를 쉼표로 입력 (예: 1,2,4,6) > ")
-
-    selected = []
-    for num in sel.replace(" ", "").split(","):
-        num = num.strip()
-        if num in ALL_FLAGS:
-            selected.append(ALL_FLAGS[num][0])
+        selected = _parse_nums(sel)
 
     if not selected:
         print("  ※ 선택된 플래그가 없어 기본값(우천, 강풍)을 사용합니다.")
         selected = ["is_rain_day", "is_wind_day"]
 
-    return selected
+    # ── 수치 플래그 기준값 설정 ──────────────────────
+    print("\n  판정 기준값 설정 (Enter=기본값 유지):")
+    thresholds: dict[str, float] = {}
+    for flag_id in selected:
+        if flag_id not in FLAG_BY_ID:
+            continue
+        _, label, col, op, default, unit = FLAG_BY_ID[flag_id]
+        if col is None:
+            continue  # 범주형 플래그는 수치 기준값 없음
+        val_str = input_strip(
+            f"    {label:<10s} {_OP_SYM[op]} ? "
+            f"(기본 {default}{unit}, Enter=유지) > "
+        )
+        try:
+            thresholds[flag_id] = float(val_str)
+        except ValueError:
+            thresholds[flag_id] = default
+
+    return selected, thresholds
 
 
 # ── 메인 흐름 ────────────────────────────────────────────────
@@ -318,8 +316,15 @@ def main():
     lat_str = input_strip("  위도 (예: 37.2723, 없으면 Enter) > ")
     lon_str = input_strip("  경도 (예: 126.9853, 없으면 Enter) > ") if lat_str else ""
 
-    lat = float(lat_str) if lat_str else None
-    lon = float(lon_str) if lon_str else None
+    lat, lon = None, None
+    try:
+        if lat_str:
+            lat = float(lat_str)
+        if lon_str:
+            lon = float(lon_str)
+    except ValueError:
+        print("  ※ 좌표값이 올바르지 않아 좌표 없이 진행합니다.")
+        lat, lon = None, None
 
     # ── 2. 관측소 선택 ──
     print("\n[2/5] 관측소 선택")
@@ -361,7 +366,17 @@ def main():
         print(f"  공종 수   : {len(works)}개")
         for w in works:
             print(f"    - {w['name']}: {w['start']} ~ {w['end']}")
-            print(f"      플래그: {', '.join(w['flags'])}")
+            parts = []
+            for flag_id in w["flags"]:
+                if flag_id not in FLAG_BY_ID:
+                    continue
+                _, label, col, op, default, unit = FLAG_BY_ID[flag_id]
+                if col is None:
+                    parts.append(label)
+                else:
+                    t = w.get("thresholds", {}).get(flag_id, default)
+                    parts.append(f"{label}({_OP_SYM[op]}{t}{unit})")
+            print(f"      기준: {', '.join(parts)}")
     print("=" * 55)
 
     confirm = input_strip("\n  진행하시겠습니까? (Y/n) > ")

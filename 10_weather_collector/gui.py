@@ -3,7 +3,6 @@
 실행: python gui.py
 """
 
-import math
 import re
 import threading
 from datetime import date
@@ -11,48 +10,25 @@ from datetime import date
 import customtkinter as ctk
 from tkinter import messagebox
 
-from station_mapper import ASOS_STATIONS
+from station_mapper import ASOS_STATIONS, haversine
 from kma_client import fetch_daily_weather, parse_weather, validate_station
 from storage import init_db, upsert_weather
 from analyzer import summarize
+from collector import run_bulk_collection
+from flags import FLAG_DEFS as ALL_FLAGS, WORK_PRESETS
 
 import config as _config
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# ── 상수 ──────────────────────────────────────────────────────
-WORK_PRESETS = {
-    "토공사":          ["is_rain_day", "is_snow_day", "is_freeze_day", "is_cold_day"],
-    "철근콘크리트공사": ["is_rain_day", "is_heat_day", "is_cold_day", "is_freeze_day", "is_wind_day"],
-    "타워크레인작업":   ["is_wind_crane", "is_wind_day", "fog_yn"],
-    "도장·방수공사":   ["is_rain_day", "rain_yn", "is_no_sunshine", "is_cold_day", "is_freeze_day"],
-    "강구조물공사":    ["is_rain_day", "is_wind_day", "is_cold_day", "is_freeze_day", "is_heat_day"],
-    "포장공사":        ["is_rain_day", "is_snow_day", "is_freeze_day", "is_cold_day", "is_heat_day"],
-    "직접 입력":       [],
-}
-
-ALL_FLAGS = [
-    ("is_rain_day",      "우천 (10mm 이상)"),
-    ("is_wind_day",      "강풍 (14m/s 이상)"),
-    ("is_wind_crane",    "크레인 제한 (순간 10m/s)"),
-    ("is_snow_day",      "적설 (1cm 이상)"),
-    ("is_heat_day",      "폭염 (35℃ 이상)"),
-    ("is_cold_day",      "한파 (-10℃ 이하)"),
-    ("is_no_sunshine",   "일조 부족 (2시간 미만)"),
-    ("is_freeze_day",    "지면 동결 (0℃ 이하)"),
-    ("is_high_evap_day", "증발 과다 (10mm 이상)"),
-    ("rain_yn",          "강수 유무 (소량 포함)"),
-    ("snow_yn",          "강설 유무"),
-    ("fog_yn",           "안개"),
-]
+# 연산자 표시 기호
+_OP_SYM = {">=": "≥", "<=": "≤", "<": "<", ">": ">"}
 
 
-def _haversine(lat1, lon1, lat2, lon2) -> float:
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-    return 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+def _fmt_num(v: float) -> str:
+    """소수점 불필요 시 정수 표기 (10.0 → '10', -10.0 → '-10', 0.5 → '0.5')"""
+    return str(int(v)) if v == int(v) else str(v)
 
 
 # ── API 키 설정 다이얼로그 ─────────────────────────────────────
@@ -110,7 +86,7 @@ class WorkDialog(ctk.CTkToplevel):
     def __init__(self, parent, site_start: str, site_end: str, on_save):
         super().__init__(parent)
         self.title("공종 추가")
-        self.geometry("480x580")
+        self.geometry("520x640")
         self.resizable(False, False)
         self.grab_set()
 
@@ -118,6 +94,7 @@ class WorkDialog(ctk.CTkToplevel):
         self.site_end = site_end
         self.on_save = on_save
         self.flag_vars: dict[str, ctk.BooleanVar] = {}
+        self.threshold_vars: dict[str, ctk.StringVar] = {}
 
         self._build()
         self.after(50, self.lift)
@@ -151,16 +128,37 @@ class WorkDialog(ctk.CTkToplevel):
         ctk.CTkEntry(date_row, textvariable=self.var_ws).grid(row=1, column=0, sticky="ew", padx=(0, 8))
         ctk.CTkEntry(date_row, textvariable=self.var_we).grid(row=1, column=1, sticky="ew")
 
-        # 플래그
-        ctk.CTkLabel(self, text="작업불가일 판정 플래그 *", anchor="w").pack(fill="x", padx=20, pady=(0, 2))
-        flag_scroll = ctk.CTkScrollableFrame(self, height=170)
+        # 플래그 + 기준값
+        hdr = ctk.CTkFrame(self, fg_color="transparent")
+        hdr.pack(fill="x", padx=20, pady=(0, 2))
+        ctk.CTkLabel(hdr, text="작업불가일 판정 플래그 *", anchor="w").pack(side="left")
+        ctk.CTkLabel(hdr, text="기준값 (수정 가능)",
+                     text_color="gray", font=ctk.CTkFont(size=11)).pack(side="right")
+
+        flag_scroll = ctk.CTkScrollableFrame(self, height=220)
         flag_scroll.pack(fill="x", padx=20, pady=(0, 12))
 
         default_flags = WORK_PRESETS[self.var_preset.get()]
-        for flag_id, label in ALL_FLAGS:
+
+        for flag_id, label, col, op, default, unit in ALL_FLAGS:
             var = ctk.BooleanVar(value=flag_id in default_flags)
             self.flag_vars[flag_id] = var
-            ctk.CTkCheckBox(flag_scroll, text=label, variable=var).pack(anchor="w", pady=2)
+
+            row = ctk.CTkFrame(flag_scroll, fg_color="transparent")
+            row.pack(fill="x", pady=1)
+
+            if col is not None:
+                # 수치 플래그: 체크박스 + 연산자 + 기준값 입력 + 단위
+                ctk.CTkCheckBox(row, text=label, variable=var, width=120).pack(side="left")
+                ctk.CTkLabel(row, text=_OP_SYM[op], width=20, anchor="e").pack(side="left")
+                tvar = ctk.StringVar(value=_fmt_num(default))
+                self.threshold_vars[flag_id] = tvar
+                ctk.CTkEntry(row, textvariable=tvar, width=62).pack(side="left", padx=(2, 2))
+                ctk.CTkLabel(row, text=unit, anchor="w",
+                             font=ctk.CTkFont(size=11)).pack(side="left")
+            else:
+                # 범주형 플래그: 체크박스만
+                ctk.CTkCheckBox(row, text=label, variable=var).pack(side="left")
 
         # 버튼
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
@@ -175,6 +173,10 @@ class WorkDialog(ctk.CTkToplevel):
         flags = WORK_PRESETS.get(preset, [])
         for flag_id, var in self.flag_vars.items():
             var.set(flag_id in flags)
+        # 기준값 기본값으로 초기화
+        for flag_id, _, col, _, default, _ in ALL_FLAGS:
+            if col is not None and flag_id in self.threshold_vars:
+                self.threshold_vars[flag_id].set(_fmt_num(default))
 
     def _save(self):
         from datetime import datetime
@@ -195,8 +197,22 @@ class WorkDialog(ctk.CTkToplevel):
             messagebox.showwarning("플래그 오류", "플래그를 1개 이상 선택해 주세요.", parent=self)
             return
 
-        self.on_save({"name": name, "start": self.var_ws.get().strip(),
-                      "end": self.var_we.get().strip(), "flags": flags})
+        # 선택된 수치 플래그의 기준값 수집
+        thresholds: dict[str, float] = {}
+        for flag_id, _, col, _, default, _ in ALL_FLAGS:
+            if col is not None and flag_id in self.threshold_vars:
+                try:
+                    thresholds[flag_id] = float(self.threshold_vars[flag_id].get())
+                except ValueError:
+                    thresholds[flag_id] = default
+
+        self.on_save({
+            "name":       name,
+            "start":      self.var_ws.get().strip(),
+            "end":        self.var_we.get().strip(),
+            "flags":      flags,
+            "thresholds": thresholds,
+        })
         self.destroy()
 
 
@@ -435,7 +451,7 @@ class App(ctk.CTk):
             messagebox.showwarning("좌표 오류", "현장 정보 탭에서 위도/경도를 먼저 입력해 주세요.")
             return
         candidates = sorted(ASOS_STATIONS,
-                             key=lambda s: _haversine(lat, lon, s["lat"], s["lon"]))[:25]
+                             key=lambda s: haversine(lat, lon, s["lat"], s["lon"]))[:25]
         self._validate_and_show(candidates, lat, lon)
 
     def _validate_and_show(self, candidates: list[dict], lat=None, lon=None):
@@ -467,7 +483,7 @@ class App(ctk.CTk):
             if valid:
                 ref_lat, ref_lon = lat, lon
                 if ref_lat is not None:
-                    valid.sort(key=lambda s: _haversine(ref_lat, ref_lon, s["lat"], s["lon"]))
+                    valid.sort(key=lambda s: haversine(ref_lat, ref_lon, s["lat"], s["lon"]))
                 self.after(0, lambda: self._show_results(valid, ref_lat, ref_lon, total))
             else:
                 # 유효 결과 없음 → 기준 좌표로 인근 재검색
@@ -486,7 +502,7 @@ class App(ctk.CTk):
                     text="해당 지역 관측소 데이터 없음 → 인근 관측소 검색 중..."
                 ))
                 nearby = sorted(ASOS_STATIONS,
-                                key=lambda s: _haversine(ref_lat, ref_lon, s["lat"], s["lon"]))[:30]
+                                key=lambda s: haversine(ref_lat, ref_lon, s["lat"], s["lon"]))[:30]
                 # 후보 제외 후 재검증
                 candidate_codes = {s["code"] for s in candidates}
                 nearby = [s for s in nearby if s["code"] not in candidate_codes]
@@ -499,7 +515,7 @@ class App(ctk.CTk):
                         if future.result():
                             valid2.append(s)
 
-                valid2.sort(key=lambda s: _haversine(ref_lat, ref_lon, s["lat"], s["lon"]))
+                valid2.sort(key=lambda s: haversine(ref_lat, ref_lon, s["lat"], s["lon"]))
                 self.after(0, lambda: self._show_results(
                     valid2, ref_lat, ref_lon, total, fallback=True
                 ))
@@ -531,7 +547,7 @@ class App(ctk.CTk):
         for s in results:
             dist_str = ""
             if lat is not None and lon is not None:
-                d = _haversine(lat, lon, s["lat"], s["lon"])
+                d = haversine(lat, lon, s["lat"], s["lon"])
                 dist_str = f"  {d:.1f}km"
             label = f"[{s['code']:>4s}] {s['name']:<14s} ({s['lat']:.4f}, {s['lon']:.4f}){dist_str}"
             ctk.CTkRadioButton(
@@ -601,10 +617,24 @@ class App(ctk.CTk):
             card.pack(fill="x", pady=3)
             card.grid_columnconfigure(0, weight=1)
 
+            # 플래그 + 기준값 표시
+            thresholds = work.get("thresholds", {})
+            parts = []
+            for flag_id, label, col, op, default, unit in ALL_FLAGS:
+                if flag_id not in work["flags"]:
+                    continue
+                if col is not None:
+                    t = thresholds.get(flag_id, default)
+                    parts.append(f"{label}({_OP_SYM[op]}{_fmt_num(t)}{unit})")
+                else:
+                    parts.append(label)
+            flags_str = ", ".join(parts)
+
             ctk.CTkLabel(
                 card,
-                text=f"{work['name']}   {work['start']} ~ {work['end']}\n플래그: {', '.join(work['flags'])}",
+                text=f"{work['name']}   {work['start']} ~ {work['end']}\n{flags_str}",
                 anchor="w", justify="left", font=ctk.CTkFont(size=12),
+                wraplength=380,
             ).grid(row=0, column=0, sticky="w", padx=10, pady=6)
 
             ctk.CTkButton(
@@ -638,7 +668,34 @@ class App(ctk.CTk):
 
         self.btn_run = ctk.CTkButton(frame, text="▶  데이터 수집 시작", height=40,
                                       command=self._run)
-        self.btn_run.pack(padx=24, pady=(0, 8), fill="x")
+        self.btn_run.pack(padx=24, pady=(0, 4), fill="x")
+
+        # ── sites.json 다현장 일괄 수집 ──────────────────────────
+        ctk.CTkLabel(frame, text="─── 또는 ───────────────────────────────────────",
+                     text_color="gray", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=24, pady=(6, 0))
+
+        n_sites = len(_config.SITES)
+        if n_sites:
+            batch_desc = f"sites.json — {n_sites}개 현장 일괄 수집 (데이터 수집 + 공종 분석)"
+            batch_state = "normal"
+        else:
+            batch_desc = "sites.json — 등록된 현장 없음 (sites.json 추가 후 재시작)"
+            batch_state = "disabled"
+
+        ctk.CTkLabel(frame, text=batch_desc,
+                     text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=24, pady=(2, 2))
+
+        self.btn_batch = ctk.CTkButton(
+            frame,
+            text=f"▶▶  {n_sites}개 현장 일괄 수집 (sites.json)",
+            height=36,
+            fg_color="#2d6a4f" if n_sites else "gray",
+            hover_color="#1b4332" if n_sites else "dimgray",
+            state=batch_state,
+            command=self._run_batch,
+        )
+        self.btn_batch.pack(padx=24, pady=(0, 16), fill="x")
+
         return frame
 
     def _refresh_summary(self):
@@ -732,6 +789,59 @@ class App(ctk.CTk):
                 self.after(0, lambda: messagebox.showerror("오류", str(exc)))
             finally:
                 self.after(0, lambda: self.btn_run.configure(state="normal", text="▶  데이터 수집 시작"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _run_batch(self):
+        """sites.json에 등록된 모든 현장을 일괄 수집 및 분석"""
+        sites = _config.SITES
+        if not sites:
+            messagebox.showwarning("오류", "sites.json에 등록된 현장이 없습니다.")
+            return
+
+        self.btn_run.configure(state="disabled")
+        self.btn_batch.configure(state="disabled", text="수집 중...")
+        self.log_box.configure(state="normal")
+        self.log_box.delete("1.0", "end")
+        self.log_box.configure(state="disabled")
+
+        def worker():
+            try:
+                n = len(sites)
+                self.after(0, lambda: self._log(f"sites.json 배치 수집 시작 ({n}개 현장)..."))
+                self.after(0, lambda: self.progress_bar.configure(mode="indeterminate"))
+                self.after(0, lambda: self.progress_bar.start())
+
+                init_db()
+                run_bulk_collection()
+
+                self.after(0, lambda: self._log("데이터 수집 완료. 공종 분석 시작..."))
+
+                works_sites = [s for s in sites if s.get("works")]
+                for site in works_sites:
+                    self.after(0, lambda nm=site["name"]: self._log(f"  [{nm}] 작업불가일 산정 중..."))
+                    summarize(site)
+                    self.after(0, lambda nm=site["name"]: self._log(f"  [{nm}] ✓ 완료"))
+
+                self.after(0, lambda: self.progress_bar.stop())
+                self.after(0, lambda: self.progress_bar.configure(mode="determinate"))
+                self.after(0, lambda: self.progress_bar.set(1.0))
+                self.after(0, lambda: self._log(f"✓ 배치 완료 ({n}개 현장)"))
+                self.after(0, lambda: messagebox.showinfo(
+                    "완료", f"{n}개 현장 배치 수집이 완료되었습니다."))
+
+            except Exception as exc:
+                self.after(0, lambda: self.progress_bar.stop())
+                self.after(0, lambda: self.progress_bar.configure(mode="determinate"))
+                self.after(0, lambda: self._log(f"[ERROR] {exc}"))
+                self.after(0, lambda: messagebox.showerror("오류", str(exc)))
+            finally:
+                n = len(sites)
+                self.after(0, lambda: self.btn_run.configure(state="normal"))
+                self.after(0, lambda: self.btn_batch.configure(
+                    state="normal" if n else "disabled",
+                    text=f"▶▶  {n}개 현장 일괄 수집 (sites.json)",
+                ))
 
         threading.Thread(target=worker, daemon=True).start()
 
