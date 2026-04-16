@@ -1,5 +1,12 @@
 # file
 **/remember.md
+
+# 민감 정보 포함 파일 (실제 의뢰인·현장명·내부 경로)
+18_report_craft/.env.example
+20_report_craft_partially/귀책분석_패턴집.md
+20_report_craft_partially/사용안내.txt
+08_molit_trade_collector/bulk_collector.bat
+10_weather_collector/build.bat
 00_myworks/
 *.xlsx
 *.db
