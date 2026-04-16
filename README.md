@@ -139,26 +139,23 @@ python work/
 │           └── md_generator.py
 │
 ├── 20_report_craft_partially/
-│   ├── analyze_reports.py
-│   ├── batch_rescan.py
 │   ├── config.py
 │   ├── main.py
+│   ├── gui.py                       ← GUI 진입점
 │   ├── make_template.py
 │   ├── make_template_B.py
-│   ├── rebuild_json.py
 │   ├── remember.md
 │   ├── requirements.txt
 │   ├── 귀책분석_패턴집.md
+│   ├── 귀책분석_자동화.spec         ← PyInstaller 빌드 설정
+│   ├── build.bat
 │   ├── 사용안내.txt
-│   ├── src/
-│   │   ├── correspondence_scanner.py
-│   │   ├── prompt_builder.py
-│   │   ├── reference_learner.py
-│   │   ├── report_generator.py
-│   │   └── text_extractor.py
-│   └── tests/
-│       ├── test_contract_parser.py
-│       └── test_validate.py
+│   └── src/
+│       ├── correspondence_scanner.py
+│       ├── prompt_builder.py
+│       ├── reference_learner.py
+│       ├── report_generator.py
+│       └── text_extractor.py
 │
 └── 21_crawling_pages/
     ├── README.md
@@ -507,19 +504,31 @@ python main.py generate
 
 공문·변경계약서 등 수신자료를 스캔하여 건설공사 분쟁 보고서의 **귀책분석 파트** 초안을 자동 생성.
 
-- **3-Pass 공문 필터링**: 폴더명 분류 → 공문 여부 확인 → 프로젝트 관련성 검사
+- **3-Pass 공문 필터링**: 폴더명 분류 → 공문 여부 확인 → 귀책 관련성 검사 (키워드 매칭)
+- **borderline 자동 재분류**: 키워드 미매칭 공문을 제목·파일명 기반으로 재검사 — 관련 공문은 자동 승격, 무관 문서(식대·고지서 등)는 자동 제외
+- **scan_no 추적 체인**: 스캔 번호가 프롬프트 → data.json → 최종 docx까지 유지되어 원본 파일 역추적 가능
+- **validate 검증**: hard_error(생성 중단) / soft_warning(경고 후 진행) 이중 구조 — 소결 누락·일수 불일치·필수 필드 누락 자동 감지
+- **14개 reference 패턴 학습**: 실제 완성 보고서에서 귀책분석 섹션 추출 → Claude 문체·논리 구조 학습
 - **멀티포맷 추출**: docx / pdf / hwp / 이미지(OCR)
-- **패턴 기반 생성**: `귀책분석_패턴집.md`의 규칙을 적용하여 표·서술 작성
 - **docx 출력**: `02_귀책분석_[프로젝트명]_[날짜].docx`
-- 금액·비용 관련 내용은 분석 제외, 귀책분석 파트만 처리
+- **Claude Code 연동**: API 미사용 — Claude Code가 직접 파일을 읽고 data.json 생성
+- **EXE 빌드**: PyInstaller (`귀책분석_자동화.spec`)
 
 ```bash
-python main.py             # 단일 프로젝트 처리
-python batch_rescan.py     # 여러 프로젝트 일괄 재스캔
-python analyze_reports.py  # 완성본 ↔ 초안 대조 분석
+# 권장: scan + prepare 한 번에
+python main.py scanprepare "C:\...\수신자료" --project 프로젝트명
+
+# validate + generate 한 번에
+python main.py finish 프로젝트명
+
+# 품질 비교 (output vs reference)
+python main.py compare-all
+
+# 전체 프로젝트 일괄 재스캔
+python main.py rescan-all
 ```
 
-**의존성**: python-docx, pdfminer.six, PyMuPDF, pytesseract
+**의존성**: python-docx, pdfminer.six, PyMuPDF, pytesseract, tqdm
 
 ---
 
@@ -550,7 +559,7 @@ python land_price_lookup.py # 공시지가 조회
 | 08 실거래가 | 68지역 × 4유형 × 10년 | 일일 한도 관리, 재개 기능 |
 | 10 기상 | 727개 관측소 자동 탐색 + 공종별 작업불가일 산정 | Haversine, APScheduler |
 | 18 보고서 | PDF·HWP·Excel 등 멀티포맷 → Word 보고서 | 폴백 체인, Claude Code 연동 |
-| 20 귀책분석 | 공문 3-Pass 필터링 → 귀책분석 docx 자동 생성 | 패턴집 기반 생성, 멀티포맷 추출 |
+| 20 귀책분석 | 공문 3-Pass 필터링 + borderline 자동 재분류 → 귀책분석 docx 자동 생성 | scan_no 추적 체인, validate 이중 검증, 14개 reference 패턴 |
 
 ### 공통 설계 패턴
 
@@ -587,6 +596,6 @@ python land_price_lookup.py # 공시지가 조회
 - **장경로 지원**: `05`는 Windows 260자 경로 제한을 UNC 경로(`\\?\`)로 우회
 - **API 일일 한도**: `08`은 국토부 API 일일 10,000건 한도를 유형별로 자동 관리
 - **Tesseract**: `09`, `18`, `20` OCR 기능 사용 시 Tesseract 및 한국어 언어팩(`kor`) 별도 설치 필요
-- **Claude Code 연동**: `18`은 Anthropic API 미사용 — Claude Code CLI가 직접 파일을 읽고 분석
+- **Claude Code 연동**: `18`, `20`은 Anthropic API 미사용 — Claude Code CLI가 직접 파일을 읽고 분석·JSON 생성
 - **현장 정보 보안**: `10`은 현장명·위경도를 `sites.json`으로 분리 관리 (git 비공개)
 - **V-World API**: `21`의 공시지가 조회 기능 사용 시 V-World API 키 필요 (vworld.kr 발급)
