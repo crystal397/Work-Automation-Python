@@ -389,9 +389,20 @@ class App(tk.Tk):
         w.insert("end", f"{v.source_url}\n", "url")
         w.insert("end", "\n")
 
+        if r.consistency_warning:
+            w.insert("end", f"{r.consistency_warning}\n", "warn")
+            w.insert("end", "\n")
+
         if r.transitional_flag:
-            w.insert("end", "⚠ 부칙 경과규정 탐지 — 사용자 확인 필요\n", "warn")
+            type_label = {
+                "A": "유형 A (법령 전체 경과규정)",
+                "B": "유형 B (조문 단위 경과규정)",
+            }.get(r.transitional_type, "유형 미확인")
+            w.insert("end", f"⚠ 부칙 경과규정 탐지 [{type_label}] — 사용자 확인 필요\n", "warn")
             w.insert("end", f"  발견 문장: {r.transitional_text}\n", "warn")
+            if r.transitional_type == "B" and r.transitional_articles:
+                art_list = ", ".join(f"제{n}조" for n in r.transitional_articles)
+                w.insert("end", f"  → 영향 조문: {art_list}\n", "warn")
             if r.prev_version:
                 pv = r.prev_version
                 w.insert("end", f"  직전 버전: {pv.announce_num} | 시행일: {pv.enforce_date}\n")

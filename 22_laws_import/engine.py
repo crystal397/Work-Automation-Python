@@ -395,20 +395,18 @@ class LawMatcher:
 
     # ── 6단계 매칭 로직 ────────────────────────────────────────────────────────
 
-    def _admrul_history(self, mst: str, query: str) -> list[LawVersion]:
+    def _admrul_history(self, mst: str, query: str) -> tuple[list[LawVersion], str]:
         """행정규칙 연혁 버전 목록 수집 — 4단계 fallback.
 
-        1단계: lawHistory.do (admrul) — API가 공식 지원하면 가장 정확
-        2단계: 웹 스크래핑 — law.go.kr 행정규칙 연혁 페이지 파싱
-        3단계: search_law(display=100) — 검색 결과에 복수 버전이 포함된 경우
-        4단계: 빈 목록 반환 (호출자가 현행 버전으로 fallback)
+        Returns:
+            (versions, source) — source: "api" | "scraper" | "search" | ""
         """
         # 1단계: lawHistory.do admrul 시도
         try:
             versions = self._get_history(mst, "admrul")
             if versions:
                 logger.info("[행정규칙 연혁] lawHistory.do 성공: %d건", len(versions))
-                return versions
+                return versions, "api"
         except Exception as exc:
             logger.debug("[행정규칙 연혁] lawHistory.do 실패: %s", exc)
 
@@ -422,7 +420,7 @@ class LawMatcher:
             versions.sort(key=lambda v: v.enforce_date)
             if versions:
                 logger.info("[행정규칙 연혁] 스크래핑 성공: %d건", len(versions))
-                return versions
+                return versions, "scraper"
         except Exception as exc:
             logger.debug("[행정규칙 연혁] 스크래핑 실패: %s", exc)
 
@@ -442,11 +440,11 @@ class LawMatcher:
                 logger.info(
                     "[행정규칙 연혁] search_law fallback 성공: %d건", len(versions)
                 )
-                return versions
+                return versions, "search"
         except Exception as exc:
             logger.debug("[행정규칙 연혁] search_law fallback 실패: %s", exc)
 
-        return []
+        return [], ""
 
     def _match_admrul(
         self,
@@ -477,41 +475,63 @@ class LawMatcher:
         ) or laws[0]
         mst = str(raw_current.get("법령MST") or raw_current.get("MST") or "")
 
-        # 연혁 수집 시도
-        all_versions = self._admrul_history(mst, query)
+        # 연혁 수집 시도 (B1 수정: source 명시 추적)
+        all_versions, history_source = self._admrul_history(mst, query)
 
         if all_versions:
             # 입찰공고일 이전 시행 버전 필터
             candidates = [v for v in all_versions if v.enforce_date <= bid_date]
-            if candidates:
-                primary = candidates[-1]
-                prev_version = candidates[-2] if len(candidates) >= 2 else None
-                history_source = "lawHistory" if len(all_versions) > 1 else "search"
-                logger.info(
-                    "[행정규칙] '%s' — 연혁 %d건 확보(%s), 선정: %s (시행일 %s)",
-                    display_name, len(all_versions), history_source,
-                    primary.announce_num, primary.enforce_date,
+
+            # B2 수정: 연혁은 있으나 입찰공고일 이전 버전이 없는 경우 명시
+            if not candidates:
+                logger.warning(
+                    "[행정규칙] '%s' — 연혁 %d건 확보했으나 입찰공고일(%s) 이전 시행 버전 없음",
+                    display_name, len(all_versions), bid_date,
                 )
-
-                text = self._get_text(primary)
-                transitional, excerpt, trans_type, trans_articles = self._detect_transitional(text)
-                relevant_articles = self._filter_articles(text)
-
+                earliest = all_versions[0]
                 return MatchResult(
                     display_name=display_name,
-                    selected=primary,
-                    prev_version=prev_version,
-                    transitional_flag=transitional,
-                    transitional_text=excerpt,
-                    transitional_type=trans_type,
-                    transitional_articles=trans_articles,
-                    relevant_articles=relevant_articles,
-                    needs_user_review=transitional,
+                    selected=earliest, prev_version=None,
+                    transitional_flag=False, transitional_text="",
                     warning=(
-                        "※ 행정규칙 연혁은 부분적으로만 제공될 수 있습니다. "
-                        "실제 시행 버전을 추가 확인하세요."
-                    ) if history_source == "search" else "",
+                        f"⚠ 행정규칙 연혁 {len(all_versions)}건 확보했으나 "
+                        f"입찰공고일({bid_date}) 이전 시행 버전 없음 — "
+                        f"가장 오래된 버전(시행일 {earliest.enforce_date}) 표시"
+                    ),
+                    needs_user_review=True,
                 )
+
+            primary = candidates[-1]
+            prev_version = candidates[-2] if len(candidates) >= 2 else None
+            logger.info(
+                "[행정규칙] '%s' — 연혁 %d건 확보(소스: %s), 선정: %s (시행일 %s)",
+                display_name, len(all_versions), history_source,
+                primary.announce_num, primary.enforce_date,
+            )
+
+            text = self._get_text(primary)
+            transitional, excerpt, trans_type, trans_articles = self._detect_transitional(text)
+            relevant_articles = self._filter_articles(text)
+
+            # 소스별 warning 메시지
+            source_warning = {
+                "api": "",
+                "scraper": "※ 행정규칙 연혁은 웹 스크래핑으로 확보 — 실제 시행 버전 추가 확인 권장",
+                "search": "※ 행정규칙 연혁은 검색 결과 기반 (일부 누락 가능) — 실제 시행 버전 추가 확인 권장",
+            }.get(history_source, "")
+
+            return MatchResult(
+                display_name=display_name,
+                selected=primary,
+                prev_version=prev_version,
+                transitional_flag=transitional,
+                transitional_text=excerpt,
+                transitional_type=trans_type,
+                transitional_articles=trans_articles,
+                relevant_articles=relevant_articles,
+                needs_user_review=transitional,
+                warning=source_warning,
+            )
 
         # 연혁 확보 실패 — 현행 버전으로 fallback
         logger.warning("[행정규칙] '%s' — 연혁 확보 실패, 현행 버전 표시", display_name)
