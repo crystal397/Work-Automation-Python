@@ -8,14 +8,17 @@
   5. 상위·하위법 정합성 — law/시행령/시행규칙 시행일 비교 경고
   6. 사용자 검토   — 자동 확정 불가 시 두 후보 모두 출력 + 플래그
 """
+import json
 import logging
 import re
+import subprocess
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable, Optional
 
 from api_client import LawAPIClient
 from cache import LawCache
+from scraper import scrape_admrul_history
 import config
 
 logger = logging.getLogger(__name__)
@@ -39,12 +42,22 @@ _TRANSITIONAL_B_PATTERNS: list[re.Pattern] = [
 # 유형 B 경과규정에서 영향받는 조번호 추출
 _ARTICLE_NUM_PATTERN = re.compile(r"제\s*(\d+)\s*조")
 
-# 상위·하위법 정합성 확인 그룹 (display_name 기준 접두사)
+# 상위·하위법 정합성 확인 그룹 (display_name 기준)
+# law 타입끼리만 비교 — admrul은 시행일이 달라도 정상이므로 별도 처리
 _LAW_FAMILY_GROUPS: list[list[str]] = [
     ["국가계약법", "국가계약법 시행령", "국가계약법 시행규칙"],
     ["지방계약법", "지방계약법 시행령", "지방계약법 시행규칙"],
     ["하도급법", "하도급법 시행령"],
+    ["조달사업에 관한 법률", "조달사업에 관한 법률 시행령"],
 ]
+
+# 행정규칙 ↔ 상위 법령 연결 (시행일 불일치 시 soft warning 용도)
+_ADMRUL_PARENT_MAP: dict[str, str] = {
+    "공사계약일반조건": "국가계약법",
+    "예정가격 작성기준": "국가계약법",
+    "정부 입찰·계약 집행기준": "국가계약법",
+    "지방자치단체 입찰 및 계약집행기준": "지방계약법",
+}
 
 
 # ── 데이터 클래스 ─────────────────────────────────────────────────────────────
@@ -195,49 +208,119 @@ class LawMatcher:
 
         유형 A: 법령 전체 적용 — "이 법 시행 전 공고 → 종전 규정 적용"
         유형 B: 조문 단위 적용 — "제○조 개정규정은 시행 후 최초 공고 분부터"
+
+        유형 B는 부칙단위별로 개별 처리하여 조번호 오추출을 방지한다.
         """
         sections = text.get("부칙") or {}
         units = sections.get("부칙단위", [])
         if isinstance(units, dict):
             units = [units]
 
-        full_text = ""
+        # 부칙단위별 텍스트 분리 (③ 개선: 단위별 개별 파싱으로 조번호 혼재 방지)
+        unit_texts: list[str] = []
         for unit in units:
             content = unit.get("부칙내용") or ""
             if isinstance(content, list):
                 content = " ".join(str(c) for c in content)
-            full_text += str(content) + " "
+            unit_texts.append(str(content))
 
-        def _excerpt(m: re.Match) -> str:
+        full_text = " ".join(unit_texts)
+
+        def _excerpt(text_src: str, m: re.Match) -> str:
             start = max(0, m.start() - 20)
-            end = min(len(full_text), m.end() + 80)
-            return full_text[start:end].strip()
+            end = min(len(text_src), m.end() + 80)
+            return text_src[start:end].strip()
 
-        # 유형 B 먼저 확인 (더 구체적인 패턴)
-        for pattern in _TRANSITIONAL_B_PATTERNS:
-            m = pattern.search(full_text)
-            if m:
-                excerpt = _excerpt(m)
-                # 발췌문에서 영향받는 조번호 추출
-                # 발췌 앞 문맥(최대 100자)까지 포함해 조번호 탐색
-                context_start = max(0, m.start() - 100)
-                context = full_text[context_start: m.end() + 20]
-                art_nums = _ARTICLE_NUM_PATTERN.findall(context)
-                logger.warning(
-                    "경과규정 유형 B 탐지 — 패턴: %s | 영향 조: %s | 발췌: %s",
-                    pattern.pattern, art_nums, excerpt[:80],
-                )
-                return True, excerpt, "B", art_nums
+        # 유형 B: 부칙단위별 개별 탐색 → 해당 단위 내 조번호만 추출
+        for unit_text in unit_texts:
+            for pattern in _TRANSITIONAL_B_PATTERNS:
+                m = pattern.search(unit_text)
+                if m:
+                    excerpt = _excerpt(unit_text, m)
+                    # 이 부칙단위 텍스트 내에서만 조번호 추출 (타 단위 혼재 방지)
+                    art_nums = _ARTICLE_NUM_PATTERN.findall(unit_text)
+                    logger.warning(
+                        "경과규정 유형 B 탐지 — 패턴: %s | 영향 조: %s | 발췌: %s",
+                        pattern.pattern, art_nums, excerpt[:80],
+                    )
+                    return True, excerpt, "B", art_nums
 
-        # 유형 A 확인
+        # 유형 A: 전체 텍스트 탐색 (조번호 추출 불필요)
         for pattern in _TRANSITIONAL_A_PATTERNS:
             m = pattern.search(full_text)
             if m:
-                excerpt = _excerpt(m)
+                excerpt = _excerpt(full_text, m)
                 logger.warning(
                     "경과규정 유형 A 탐지 — 패턴: %s | 발췌: %s", pattern.pattern, excerpt[:80]
                 )
                 return True, excerpt, "A", []
+
+        # regex 미탐지 → Claude Code CLI fallback (② 비정형 패턴 보완)
+        return self._detect_transitional_claude(full_text)
+
+    def _detect_transitional_claude(
+        self, full_text: str
+    ) -> tuple[bool, str, str, list[str]]:
+        """Claude Code CLI를 사용한 경과규정 탐지 (regex 미탐지 시 fallback).
+
+        `claude -p "..."` 를 subprocess로 호출한다.
+        claude CLI가 설치되지 않은 경우 조용히 스킵한다.
+        """
+        if not full_text.strip():
+            return False, "", "", []
+
+        prompt = (
+            "다음은 법령 부칙 텍스트입니다. "
+            "공기연장 입찰공고일 기준 경과규정이 있는지 분석해주세요.\n\n"
+            "[부칙 텍스트]\n"
+            f"{full_text[:3000]}\n\n"
+            "다음 JSON 형식으로만 응답하세요 (마크다운·설명 없이 순수 JSON만):\n"
+            '{"found": true 또는 false, '
+            '"type": "A" 또는 "B" 또는 "", '
+            '"excerpt": "발견된 경과규정 문장 (없으면 빈 문자열)", '
+            '"articles": ["1", "2"]}\n\n'
+            "유형 A: 법령 전체 경과규정 — 예) "
+            '"이 법 시행 전에 공고된 입찰에 대해서는 종전의 규정에 따른다"\n'
+            "유형 B: 조문 단위 경과규정 — 예) "
+            '"제○조의 개정규정은 시행 후 최초로 입찰 공고하는 분부터 적용"\n'
+            "articles: 유형 B일 때 영향받는 조번호(숫자만), 유형 A이면 빈 배열"
+        )
+
+        try:
+            result = subprocess.run(
+                ["claude", "-p", prompt],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                encoding="utf-8",
+            )
+            if result.returncode != 0 or not result.stdout.strip():
+                return False, "", "", []
+
+            output = result.stdout.strip()
+            # 응답에 JSON 외 텍스트가 섞여도 JSON 블록만 추출
+            json_match = re.search(r"\{[^{}]*\}", output, re.DOTALL)
+            if not json_match:
+                return False, "", "", []
+
+            data = json.loads(json_match.group())
+            found = bool(data.get("found", False))
+            if found:
+                trans_type = str(data.get("type", ""))
+                excerpt = str(data.get("excerpt", ""))
+                articles = [str(a) for a in data.get("articles", [])]
+                logger.warning(
+                    "경과규정 Claude Code 탐지 — 유형: %s | 발췌: %s",
+                    trans_type, excerpt[:80],
+                )
+                return True, excerpt, trans_type, articles
+
+        except FileNotFoundError:
+            logger.debug("claude CLI 없음 — 비정형 경과규정 탐지 스킵")
+        except subprocess.TimeoutExpired:
+            logger.debug("claude CLI 타임아웃 — 경과규정 탐지 스킵")
+        except (json.JSONDecodeError, Exception) as exc:
+            logger.debug("Claude Code 응답 파싱 실패: %s", exc)
 
         return False, "", "", []
 
@@ -256,19 +339,32 @@ class LawMatcher:
             if isinstance(paragraphs_raw, dict):
                 paragraphs_raw = [paragraphs_raw]
 
-            # 항 정규화 + 호(號) 추출
+            # 항 정규화 + 호(號) + 목(目) 추출
             paragraphs: list[dict] = []
             for para in paragraphs_raw:
                 sub_items_raw = para.get("호") or []
                 if isinstance(sub_items_raw, dict):
                     sub_items_raw = [sub_items_raw]
-                sub_items = [
-                    {
+
+                sub_items = []
+                for s in sub_items_raw:
+                    # 목(目) — 호 하위 단계
+                    sub_sub_raw = s.get("목") or []
+                    if isinstance(sub_sub_raw, dict):
+                        sub_sub_raw = [sub_sub_raw]
+                    sub_subs = [
+                        {
+                            "목번호": str(ss.get("목번호") or ss.get("subsubNo") or ""),
+                            "목내용": str(ss.get("목내용") or ss.get("subsubContent") or ""),
+                        }
+                        for ss in sub_sub_raw
+                    ]
+                    sub_items.append({
                         "호번호": str(s.get("호번호") or s.get("subNo") or ""),
                         "호내용": str(s.get("호내용") or s.get("subContent") or ""),
-                    }
-                    for s in sub_items_raw
-                ]
+                        "목": sub_subs,
+                    })
+
                 paragraphs.append({
                     "항번호": str(para.get("항번호") or ""),
                     "항내용": str(para.get("항내용") or ""),
@@ -279,8 +375,14 @@ class LawMatcher:
             sub_text = " ".join(
                 s["호내용"] for p in paragraphs for s in p["호"]
             )
+            subsub_text = " ".join(
+                ss["목내용"]
+                for p in paragraphs
+                for s in p["호"]
+                for ss in s["목"]
+            )
 
-            combined = title + content + para_text + sub_text
+            combined = title + content + para_text + sub_text + subsub_text
             if any(kw in combined for kw in config.EXTENSION_KEYWORDS):
                 articles.append({
                     "조번호": str(unit.get("조번호") or ""),
@@ -294,11 +396,12 @@ class LawMatcher:
     # ── 6단계 매칭 로직 ────────────────────────────────────────────────────────
 
     def _admrul_history(self, mst: str, query: str) -> list[LawVersion]:
-        """행정규칙 연혁 버전 목록 수집 — 3단계 fallback.
+        """행정규칙 연혁 버전 목록 수집 — 4단계 fallback.
 
-        1단계: lawHistory.do (admrul) — API가 지원하면 가장 정확
-        2단계: search_law(display=100) — 다수 버전이 검색 결과에 포함될 수 있음
-        3단계: 빈 목록 반환 (호출자가 현행 버전으로 fallback)
+        1단계: lawHistory.do (admrul) — API가 공식 지원하면 가장 정확
+        2단계: 웹 스크래핑 — law.go.kr 행정규칙 연혁 페이지 파싱
+        3단계: search_law(display=100) — 검색 결과에 복수 버전이 포함된 경우
+        4단계: 빈 목록 반환 (호출자가 현행 버전으로 fallback)
         """
         # 1단계: lawHistory.do admrul 시도
         try:
@@ -309,7 +412,21 @@ class LawMatcher:
         except Exception as exc:
             logger.debug("[행정규칙 연혁] lawHistory.do 실패: %s", exc)
 
-        # 2단계: search_law 광범위 검색으로 여러 버전 수집
+        # 2단계: 웹 스크래핑 (beautifulsoup4 필요)
+        try:
+            raw_list = scrape_admrul_history(mst)
+            versions = [
+                v for raw in raw_list
+                if (v := _raw_to_version(raw, mst, "admrul"))
+            ]
+            versions.sort(key=lambda v: v.enforce_date)
+            if versions:
+                logger.info("[행정규칙 연혁] 스크래핑 성공: %d건", len(versions))
+                return versions
+        except Exception as exc:
+            logger.debug("[행정규칙 연혁] 스크래핑 실패: %s", exc)
+
+        # 3단계: search_law 광범위 검색으로 여러 버전 수집
         try:
             raw_list = self.client.search_law(query, target="admrul", display=100)
             versions = [
@@ -517,17 +634,17 @@ class LawMatcher:
         )
 
     def _check_family_consistency(self, results: list[MatchResult]) -> None:
-        """5단계: 상위·하위법(법률/시행령/시행규칙) 시행일 정합성 확인.
+        """5단계: 상위·하위법 시행일 정합성 확인.
 
-        같은 법령 계열(예: 국가계약법 / 시행령 / 시행규칙)의 시행일이
-        서로 다른 경우 각 MatchResult에 consistency_warning을 추가한다.
+        [law 계열] 법률/시행령/시행규칙 간 시행일 불일치 → 경고 + 사용자 확인 요청
+        [admrul 연결] 행정규칙 시행일이 상위 법령보다 오래된 경우 → soft warning
         results 목록을 in-place 수정한다.
         """
         result_by_name = {r.display_name: r for r in results}
 
+        # ── law 계열 정합성 ──────────────────────────────────────────────────────
         for family in _LAW_FAMILY_GROUPS:
             members = [result_by_name[name] for name in family if name in result_by_name]
-            # 시행일을 확인할 수 있는 것만
             dated = [(m, m.selected.enforce_date) for m in members if m.selected]
             if len(dated) < 2:
                 continue
@@ -536,15 +653,36 @@ class LawMatcher:
             if len(dates) == 1:
                 continue  # 모두 동일 — 정상
 
-            # 불일치: 각 결과에 경고 추가
-            date_summary = ", ".join(
-                f"{m.display_name}={d}" for m, d in dated
-            )
+            date_summary = ", ".join(f"{m.display_name}={d}" for m, d in dated)
             warn_msg = f"⚠ 상위·하위법 시행일 불일치 — {date_summary}"
             logger.warning("정합성 경고: %s", warn_msg)
             for m, _ in dated:
                 m.consistency_warning = warn_msg
                 m.needs_user_review = True
+
+        # ── admrul ↔ 상위 법령 soft warning ────────────────────────────────────
+        for admrul_name, parent_name in _ADMRUL_PARENT_MAP.items():
+            admrul_r = result_by_name.get(admrul_name)
+            parent_r = result_by_name.get(parent_name)
+            if not admrul_r or not parent_r:
+                continue
+            if not admrul_r.selected or not parent_r.selected:
+                continue
+
+            admrul_date = admrul_r.selected.enforce_date
+            parent_date = parent_r.selected.enforce_date
+
+            # 행정규칙 시행일이 상위 법령보다 1년 이상 오래된 경우 경고
+            days_diff = (parent_date - admrul_date).days
+            if days_diff > 365:
+                warn_msg = (
+                    f"※ {admrul_name} 시행일({admrul_date})이 "
+                    f"상위 법령 {parent_name} 시행일({parent_date})보다 "
+                    f"{days_diff // 365}년 이상 앞섬 — 행정규칙 갱신 여부 확인 권장"
+                )
+                logger.warning("admrul soft warning: %s", warn_msg)
+                if not admrul_r.consistency_warning:
+                    admrul_r.consistency_warning = warn_msg
 
     def match_all(
         self,

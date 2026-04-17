@@ -278,6 +278,16 @@ class WordReportGenerator:
                                 s_para.paragraph_format.left_indent = Cm(1.0)
                                 run_s = s_para.add_run(f"    {sub_num}. {sub_content}")
                                 _set_font(run_s, size=9)
+
+                            # 목(目) 단위 출력
+                            for sub_sub in sub_item.get("목", []):
+                                ss_num = str(sub_sub.get("목번호") or "")
+                                ss_content = str(sub_sub.get("목내용") or "")
+                                if ss_content:
+                                    ss_para = self.doc.add_paragraph(style="List Paragraph")
+                                    ss_para.paragraph_format.left_indent = Cm(1.5)
+                                    run_ss = ss_para.add_run(f"      {ss_num}) {ss_content}")
+                                    _set_font(run_ss, size=9)
             else:
                 no_art = self.doc.add_paragraph()
                 run_n = no_art.add_run("(공기연장 관련 조문 없음 또는 키워드 미탐지)")
