@@ -158,13 +158,19 @@ python work/
 │       ├── report_generator.py
 │       └── text_extractor.py
 │
-└── 21_crawling_pages/
-    ├── README.md
-    ├── cak_crawler.py
-    ├── csv_to_xlsx.py
-    ├── debug_api.py
-    ├── kosca_crawler.py
-    └── land_price_lookup.py
+├── 21_crawling_pages/
+│   ├── README.md
+│   ├── cak_crawler.py
+│   ├── csv_to_xlsx.py
+│   ├── debug_api.py
+│   ├── kosca_crawler.py
+│   └── land_price_lookup.py
+│
+└── 23_excel_margins/
+    ├── adjust_excel_margins.py   ← 여백 조정 + GUI 진입점
+    ├── build.bat                 ← PyInstaller EXE 빌드
+    └── dist/
+        └── 엑셀_여백_조정.exe    ← 배포용 단일 EXE
 ```
 
 ---
@@ -533,6 +539,26 @@ python main.py rescan-all
 ```
 
 **의존성**: python-docx, pdfminer.six, PyMuPDF, pytesseract, tqdm
+
+---
+
+### 23. 엑셀 인쇄 여백 일괄 조정
+
+폴더 내 모든 엑셀 파일의 시트 여백을 일괄 검사·수정하는 도구.
+
+- 좌+우 여백 합이 지정값(기본 2cm)인 시트를 자동 탐지
+- 좌 1cm / 우 1cm로 재설정 후 저장
+- `.xlsx` / `.xlsm` 대상, 임시 파일(`~$`) 자동 제외
+- **Tkinter GUI**: 폴더 선택 → 실행 → 결과 로그 표시
+- CLI 모드 겸용: `exe "경로"` 인자 전달 시 터미널 실행
+- PyInstaller 단일 EXE 빌드 (`build.bat`)
+
+```bash
+python adjust_excel_margins.py          # GUI 실행
+python adjust_excel_margins.py "경로"   # CLI 실행
+```
+
+**의존성**: openpyxl, tkinter (내장)
 
 ---
 
