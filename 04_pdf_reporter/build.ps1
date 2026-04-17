@@ -33,7 +33,7 @@ rl_datas,  rl_binaries,  rl_hiddens  = collect_all("reportlab")
 pdf_datas, pdf_binaries, pdf_hiddens = collect_all("pypdf")
 
 a = Analysis(
-    ["pdf_merger_v3.py"],
+    ["pdf_merger_v4.py"],
     pathex=[],
     binaries=rl_binaries + pdf_binaries,
     datas=rl_datas + pdf_datas,

@@ -32,7 +32,7 @@ try {
 Write-Host ""
 Write-Host "[2/4] Installing dependencies..." -ForegroundColor Yellow
 
-$Packages = @("openpyxl", "python-docx", "python-pptx", "PyMuPDF", "py7zr", "rarfile", "xlrd", "pyinstaller")
+$Packages = @("openpyxl", "python-docx", "python-pptx", "PyMuPDF", "olefile", "py7zr", "rarfile", "xlrd", "pyinstaller")
 foreach ($pkg in $Packages) {
     Write-Host "      pip install $pkg ..." -NoNewline
     $result = python -m pip install $pkg 2>&1 | Out-String

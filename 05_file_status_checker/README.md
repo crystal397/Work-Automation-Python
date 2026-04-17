@@ -20,11 +20,11 @@
 |------|-----------|-------------------|
 | `.xlsx` `.xlsm` `.xlsb` | openpyxl → xlrd → 바이너리(OLE2) 순으로 시도 | Microsoft Excel 워크시트 |
 | `.xls` | 동일 | Microsoft Excel 워크시트 |
-| `.docx` | python-docx로 열기, 내용 여부 확인 | Microsoft Word 문서 |
-| `.pptx` | python-pptx로 열기, 슬라이드 수 확인 | Microsoft PowerPoint 프레젠테이션 |
-| `.pdf` | PyMuPDF로 열기, 텍스트량으로 스캔본/텍스트 구분, AIP/DRM 감지 | Adobe Acrobat 문서 (텍스트) / (스캔본) |
-| `.hwp` | 파일 읽기 가능 여부 확인 (HWP 버전별 구조 차이로 인해 내용 검증은 한글 프로그램 필요) | 한글 문서 |
-| `.hwpx` | ZIP 구조 확인 | 한글 문서 |
+| `.docx` | python-docx로 열기, 내용 여부 + 텍스트 깨짐 비율 검사 | Microsoft Word 문서 |
+| `.pptx` | OLE2 시그니처 감지 → IRM/DRM 스트림 확인, 정상 ZIP이면 python-pptx로 슬라이드 수 + 텍스트 깨짐 비율 검사 | Microsoft PowerPoint 프레젠테이션 |
+| `.pdf` | PyMuPDF로 열기, 텍스트량으로 스캔본/텍스트 구분, AIP/DRM 감지, 한국형 PDF DRM(Markany·SyncEZ 등) 안내 페이지 패턴 감지 | Adobe Acrobat 문서 (텍스트) / (스캔본) |
+| `.hwp` | `.pfile` 시그니처(RMS/AIP 암호화) 감지, OLE2 구조·FileHeader·BodyText/Section0 스트림 검증, HWP ParaText 레코드 직접 파싱으로 텍스트 추출 후 깨짐 비율 검사 | 한글 문서 |
+| `.hwpx` | ZIP 구조 확인, Contents/section*.xml 파싱 → `<hp:t>` 텍스트 추출 후 깨짐 비율 검사 | 한글 문서 |
 | `.png` `.jpg` `.jpeg` `.gif` `.bmp` `.tif` `.tiff` | Pillow로 유효성 확인, 해상도·색상모드 추출 | PNG 이미지 (1920×1080, RGB) |
 | `.dxf` | ezdxf로 파싱(설치 시), 미설치 시 SECTION/ENDSEC 텍스트 시그니처 확인 | AutoCAD DXF 도면 (1,234개 객체) |
 | `.dwg` | 파일 시그니처 `AC####` 확인으로 버전 판별 | AutoCAD 도면 (AC1032) |
@@ -41,10 +41,16 @@
 | `.rar` | rarfile로 압축 해제 후 내부 파일 개별 점검 | RAR 압축 파일 |
 | `.msg` `.eml` | 파일 크기로 판단 (100bytes 이상이면 정상) | Outlook 항목 |
 
+#### OLE 구조 검증 형식
+| 형식 | 점검 방식 |
+|------|-----------|
+| `.doc` | OLE2 구조 검증, WordDocument 스트림 존재 확인, IRM/DRM 스트림 감지 |
+| `.ppt` | OLE2 구조 검증, PowerPoint Document 스트림 존재 확인, IRM/DRM 스트림 감지 |
+
 #### 크기만 확인하는 형식
 | 형식 |
 |------|
-| `.doc` `.ppt` `.docm` `.pptm` (구형 Office 바이너리) |
+| `.docm` `.pptm` (구형 Office 매크로 바이너리) |
 | `.dwf` `.mpp` `.xml` `.json` |
 | 등록되지 않은 기타 확장자 |
 
@@ -62,6 +68,15 @@
 | `파일 손상 (빈 파일)` | 파일 크기가 0 |
 | `파일 손상 (내용 없음)` | 열리지만 내용이 없음 |
 | `파일 손상 (압축 파일 오류)` | 압축 파일 구조가 손상됨 |
+| `파일 손상 (OLE 구조 오류)` | .doc/.ppt/.hwp OLE2 구조 손상 |
+| `파일 손상 (WordDocument 스트림 없음)` | .doc OLE 내 핵심 스트림 누락 |
+| `파일 손상 (PowerPoint Document 스트림 없음)` | .ppt OLE 내 핵심 스트림 누락 |
+| `파일 손상 (HWP FileHeader 없음)` | .hwp OLE 내 FileHeader 스트림 누락 |
+| `파일 손상 (HWP 본문 없음)` | .hwp OLE 내 BodyText/Section0 스트림 누락 |
+| `파일 손상 (HWP 본문 압축 오류)` | .hwp BodyText 스트림 압축 해제 실패 |
+| `파일 손상 (HWPX 본문 없음)` | .hwpx ZIP 내 section XML 파일 없음 |
+| `파일 손상 (HWPX XML 오류)` | .hwpx XML 파싱 실패 |
+| `내용 깨짐 의심 (깨진 문자 XX%)` | 텍스트 깨짐 비율 15% 이상 (.docx/.pptx/.pdf/.hwp/.hwpx) |
 | `파일 손상 (이미지 오류)` | 이미지 파일 구조 손상 |
 | `파일 손상 (DWG 시그니처 오류)` | DWG AC#### 시그니처 없음 |
 | `파일 손상 (DXF 구조 오류)` | DXF SECTION/ENDSEC 구조 없음 |
@@ -122,7 +137,7 @@ check_files.exe
 ## 필요 라이브러리 설치
 
 ```bash
-pip install openpyxl python-docx python-pptx PyMuPDF py7zr rarfile xlrd tqdm Pillow
+pip install openpyxl python-docx python-pptx PyMuPDF olefile py7zr rarfile xlrd tqdm Pillow
 ```
 
 #### 선택 설치 (미설치 시 해당 형식은 크기 또는 시그니처만 확인)
@@ -151,8 +166,9 @@ pip install ezdxf     # DXF 객체 수 파싱
 
 | 형식 | 한계 |
 |------|------|
-| `.hwp` | HWP 버전별 구조가 다양해 파일 읽기 가능 여부만 확인. 내용 검증은 한글 프로그램 필요 |
-| `.doc` `.ppt` `.docm` `.pptm` | 구형 Office 형식 → 크기로만 판단 |
+| `.hwp` | OLE2 기반 HWP는 ParaText 레코드 파싱으로 텍스트 깨짐 검사. `.pfile` RMS/AIP 암호화 감지. 단, HWP 비압축 모드 파일은 깨짐 검사 불가 |
+| `.doc` `.ppt` | OLE 구조 및 핵심 스트림 존재 확인, IRM 감지. 내부 텍스트 추출은 불가 |
+| `.docm` `.pptm` | 구형 Office 매크로 형식 → 크기로만 판단 |
 | `.dwg` | 시그니처(버전 코드) 확인만 가능, 내부 도면 데이터 검증 불가 |
 | 암호 걸린 정상 파일 | 열기 실패로 기록되나 실제로는 정상 파일일 수 있음 |
 | 내용이 깨진 파일 | 라이브러리가 오류 없이 열리면 정상으로 판단될 수 있음 |
