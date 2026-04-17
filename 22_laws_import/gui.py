@@ -332,13 +332,15 @@ class App(tk.Tk):
                     r.display_name,
                     v.announce_num,
                     str(v.enforce_date),
-                    "있음 ⚠" if r.transitional_flag else "없음",
+                    (f"있음 ⚠ ({r.transitional_type}형)" if r.transitional_type else "있음 ⚠") if r.transitional_flag else "없음",
                     r.warning or ("확인 필요" if r.needs_user_review else ""),
                 )
                 if r.transitional_flag:
                     tag = "warn"
-                elif v.target == "admrul":
-                    tag = "admrul"  # 행정규칙 — 연혁 불가
+                elif r.consistency_warning:
+                    tag = "warn"
+                elif v.target == "admrul" and "연혁 조회 불가" in (r.warning or ""):
+                    tag = "admrul"  # 행정규칙 연혁 확보 실패
                 elif r.needs_user_review:
                     tag = "review"
                 else:
@@ -388,6 +390,10 @@ class App(tk.Tk):
         w.insert("end", "출처 URL: ", "label")
         w.insert("end", f"{v.source_url}\n", "url")
         w.insert("end", "\n")
+
+        if r.warning:
+            w.insert("end", f"ℹ {r.warning}\n", "warn")
+            w.insert("end", "\n")
 
         if r.consistency_warning:
             w.insert("end", f"{r.consistency_warning}\n", "warn")
