@@ -57,6 +57,9 @@ class LawAPIClient:
                 logger.warning("HTTP 오류 (%d/%d): %s — %s", attempt, config.API_RETRY, endpoint, exc)
             except requests.exceptions.RequestException as exc:
                 logger.warning("요청 실패 (%d/%d): %s — %s", attempt, config.API_RETRY, endpoint, exc)
+            except Exception as exc:
+                # API 서버가 200이지만 비XML 응답(HTML 오류 페이지 등) 반환 시 XML 파싱 실패
+                logger.warning("응답 파싱 실패 (%d/%d): %s — %s", attempt, config.API_RETRY, endpoint, exc)
 
             if attempt < config.API_RETRY:
                 time.sleep(config.API_RETRY_DELAY)

@@ -126,7 +126,8 @@ class WordReportGenerator:
             if r.selected:
                 v = r.selected
                 trans_cell = (
-                    f"있음 ⚠ ({r.transitional_type}형)" if r.transitional_flag
+                    (f"있음 ⚠ ({r.transitional_type}형)" if r.transitional_type else "있음 ⚠")
+                    if r.transitional_flag
                     else "없음"
                 )
                 note = r.consistency_warning or r.warning or (
@@ -142,7 +143,11 @@ class WordReportGenerator:
             else:
                 data = [r.display_name, "-", "-", "-", r.warning or "조회 실패"]
 
-            is_admrul = r.selected and r.selected.target == "admrul"
+            admrul_no_history = (
+                r.selected
+                and r.selected.target == "admrul"
+                and "연혁 조회 불가" in (r.warning or "")
+            )
             for i, text in enumerate(data):
                 para = cells[i].paragraphs[0]
                 para.alignment = WD_ALIGN_PARAGRAPH.CENTER if i > 0 else WD_ALIGN_PARAGRAPH.LEFT
@@ -150,9 +155,9 @@ class WordReportGenerator:
                 _set_font(run, size=9)
                 if r.transitional_flag and i == 3:
                     run.font.color.rgb = _RED
-                elif is_admrul:
-                    run.font.color.rgb = _ORANGE  # 행정규칙 — 연혁 불가 경고
-                if not r.selected:
+                elif admrul_no_history:
+                    run.font.color.rgb = _ORANGE  # 행정규칙 연혁 확보 실패
+                elif not r.selected:
                     run.font.color.rgb = _ORANGE
 
         self.doc.add_paragraph()

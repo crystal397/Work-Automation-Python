@@ -298,12 +298,20 @@ class LawMatcher:
                 return False, "", "", []
 
             output = result.stdout.strip()
-            # 응답에 JSON 외 텍스트가 섞여도 JSON 블록만 추출
-            json_match = re.search(r"\{[^{}]*\}", output, re.DOTALL)
-            if not json_match:
+            # 1순위: 응답 전체가 순수 JSON인 경우
+            # 2순위: 응답 중 JSON 블록 추출 (excerpt 내부에 {}가 있어도 처리 가능하도록 .+ 사용)
+            data = None
+            try:
+                data = json.loads(output)
+            except json.JSONDecodeError:
+                json_match = re.search(r"\{.+\}", output, re.DOTALL)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group())
+                    except json.JSONDecodeError:
+                        pass
+            if data is None:
                 return False, "", "", []
-
-            data = json.loads(json_match.group())
             found = bool(data.get("found", False))
             if found:
                 trans_type = str(data.get("type", ""))
@@ -319,7 +327,7 @@ class LawMatcher:
             logger.debug("claude CLI 없음 — 비정형 경과규정 탐지 스킵")
         except subprocess.TimeoutExpired:
             logger.debug("claude CLI 타임아웃 — 경과규정 탐지 스킵")
-        except (json.JSONDecodeError, Exception) as exc:
+        except Exception as exc:
             logger.debug("Claude Code 응답 파싱 실패: %s", exc)
 
         return False, "", "", []
@@ -632,7 +640,7 @@ class LawMatcher:
                 prev_version.announce_num if prev_version else "없음",
             )
 
-        # 5단계 — 조문 필터링
+        # 조문 필터링 — 공기연장 관련 조문 추출 (5단계 상위·하위법 정합성은 match_all에서 일괄 처리)
         relevant_articles = self._filter_articles(text)
         logger.info("공기연장 관련 조문: %d개", len(relevant_articles))
 
