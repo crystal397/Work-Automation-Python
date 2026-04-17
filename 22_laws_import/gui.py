@@ -405,9 +405,23 @@ class App(tk.Tk):
                 if art["조문내용"]:
                     w.insert("end", f"{art['조문내용']}\n")
                 for para in art.get("항", []):
+                    try:
+                        num = chr(0x245F + int(str(para.get("항번호") or "")))
+                    except (ValueError, OverflowError):
+                        num = str(para.get("항번호") or "")
                     content = str(para.get("항내용") or "")
                     if content:
-                        w.insert("end", f"  {content}\n")
+                        w.insert("end", f"  {num} {content}\n")
+                    for sub in para.get("호", []):
+                        sub_num = str(sub.get("호번호") or "")
+                        sub_content = str(sub.get("호내용") or "")
+                        if sub_content:
+                            w.insert("end", f"    {sub_num}. {sub_content}\n")
+                        for ss in sub.get("목", []):
+                            ss_num = str(ss.get("목번호") or "")
+                            ss_content = str(ss.get("목내용") or "")
+                            if ss_content:
+                                w.insert("end", f"      {ss_num}) {ss_content}\n")
                 w.insert("end", "\n")
         else:
             w.insert("end", "(공기연장 관련 조문 없음 또는 키워드 미탐지)\n")

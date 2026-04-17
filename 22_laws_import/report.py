@@ -193,10 +193,22 @@ class WordReportGenerator:
             # 버전 선정 근거
             basis_p = self.doc.add_paragraph()
             if v.target == "admrul":
-                run_b = basis_p.add_run(
-                    "[선정 근거] 행정규칙 — 연혁 조회 불가, 현행 버전 기준 표시 (수동 확인 필요)"
+                # 연혁 확보 성공 여부: prev_version이 있거나 warning에 "연혁 조회 불가"가 없으면 성공
+                history_found = r.prev_version is not None or (
+                    r.warning and "연혁 조회 불가" not in r.warning
                 )
-                _set_font(run_b, size=9, color=_ORANGE)
+                if history_found:
+                    run_b = basis_p.add_run(
+                        f"[선정 근거] 행정규칙 — 입찰공고일({self._bid_date}) 기준 "
+                        f"시행일 {v.enforce_date} 이하 중 최근 버전 선택 "
+                        f"(연혁 확보 성공 — 실제 시행 버전 추가 확인 권장)"
+                    )
+                    _set_font(run_b, size=9, color=_GRAY)
+                else:
+                    run_b = basis_p.add_run(
+                        "[선정 근거] 행정규칙 — 연혁 조회 불가, 현행 버전 기준 표시 (수동 확인 필요)"
+                    )
+                    _set_font(run_b, size=9, color=_ORANGE)
             else:
                 run_b = basis_p.add_run(
                     f"[선정 근거] 입찰공고일({self._bid_date}) 기준 — 시행일 {v.enforce_date} 이하 중 최근 버전 선택"
