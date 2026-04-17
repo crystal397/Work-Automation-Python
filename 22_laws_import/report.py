@@ -125,12 +125,19 @@ class WordReportGenerator:
 
             if r.selected:
                 v = r.selected
+                trans_cell = (
+                    f"있음 ⚠ ({r.transitional_type}형)" if r.transitional_flag
+                    else "없음"
+                )
+                note = r.consistency_warning or r.warning or (
+                    "사용자 확인 필요" if r.needs_user_review else "정상"
+                )
                 data = [
                     r.display_name,
                     v.announce_num,
                     str(v.enforce_date),
-                    "있음 ⚠" if r.transitional_flag else "없음",
-                    r.warning or ("사용자 확인 필요" if r.needs_user_review else "정상"),
+                    trans_cell,
+                    note,
                 ]
             else:
                 data = [r.display_name, "-", "-", "-", r.warning or "조회 실패"]
@@ -196,15 +203,33 @@ class WordReportGenerator:
                 )
                 _set_font(run_b, size=9, color=_GRAY)
 
-            # 부칙 경과규정 경고
+            # 5단계 정합성 경고
+            if r.consistency_warning:
+                con_box = self.doc.add_paragraph()
+                run_c = con_box.add_run(r.consistency_warning)
+                _set_font(run_c, size=9, bold=True, color=_ORANGE)
+
+            # 부칙 경과규정 경고 (유형 A/B 구분)
             if r.transitional_flag:
+                type_label = {
+                    "A": "유형 A (법령 전체 경과규정)",
+                    "B": "유형 B (특정 조문 단위 경과규정)",
+                }.get(r.transitional_type, "유형 미확인")
+
                 warn_box = self.doc.add_paragraph()
                 run_w1 = warn_box.add_run(
-                    "⚠ 부칙 경과규정 탐지 — 사용자 확인 필요\n"
+                    f"⚠ 부칙 경과규정 탐지 [{type_label}] — 사용자 확인 필요\n"
                 )
                 _set_font(run_w1, bold=True, color=_RED)
                 run_w2 = warn_box.add_run(f"발견 문장: {r.transitional_text}")
                 _set_font(run_w2, size=9, color=_RED)
+
+                # 유형 B: 영향받는 조번호 표시
+                if r.transitional_type == "B" and r.transitional_articles:
+                    art_list = ", ".join(f"제{n}조" for n in r.transitional_articles)
+                    art_p = self.doc.add_paragraph()
+                    run_a = art_p.add_run(f"  → 영향 조문: {art_list} (해당 조는 직전 버전 적용 검토 필요)")
+                    _set_font(run_a, size=9, color=_RED)
 
                 if r.prev_version:
                     pv = r.prev_version
@@ -243,6 +268,16 @@ class WordReportGenerator:
                                 circle = para_num
                             run_p = p_para.add_run(f"  {circle} {para_content}")
                             _set_font(run_p, size=9)
+
+                        # 호(號) 단위 출력
+                        for sub_item in para_item.get("호", []):
+                            sub_num = str(sub_item.get("호번호") or "")
+                            sub_content = str(sub_item.get("호내용") or "")
+                            if sub_content:
+                                s_para = self.doc.add_paragraph(style="List Paragraph")
+                                s_para.paragraph_format.left_indent = Cm(1.0)
+                                run_s = s_para.add_run(f"    {sub_num}. {sub_content}")
+                                _set_font(run_s, size=9)
             else:
                 no_art = self.doc.add_paragraph()
                 run_n = no_art.add_run("(공기연장 관련 조문 없음 또는 키워드 미탐지)")
@@ -251,17 +286,26 @@ class WordReportGenerator:
             self.doc.add_paragraph()
 
     def _add_review_list(self, results: list[MatchResult]) -> None:
-        needs = [r for r in results if r.needs_user_review or r.transitional_flag]
+        needs = [
+            r for r in results
+            if r.needs_user_review or r.transitional_flag or r.consistency_warning
+        ]
         if not needs:
             return
 
         _heading(self.doc, "3. 사용자 확인 필요 항목", 1)
         for r in needs:
             p = self.doc.add_paragraph(style="List Bullet")
+            reasons = []
+            if r.transitional_flag:
+                type_label = f"유형 {r.transitional_type}" if r.transitional_type else "유형 미확인"
+                reasons.append(f"부칙 경과규정 탐지 ({type_label})")
+            if r.consistency_warning:
+                reasons.append("상위·하위법 시행일 불일치")
+            if r.warning and not r.transitional_flag and not r.consistency_warning:
+                reasons.append(r.warning)
             run = p.add_run(
-                f"{r.display_name}"
-                + (" — 부칙 경과규정 탐지" if r.transitional_flag else "")
-                + (f" — {r.warning}" if r.warning else "")
+                f"{r.display_name}" + (" — " + " / ".join(reasons) if reasons else "")
             )
             _set_font(run, color=_RED if r.transitional_flag else _ORANGE)
 

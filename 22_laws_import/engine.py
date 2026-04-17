@@ -3,9 +3,9 @@
 6단계:
   1. 연혁 조회     — 해당 법령 전체 버전(공포번호·시행일) 수집
   2. 1차 후보 선정 — 시행일 ≤ 입찰공고일 중 가장 최근 버전
-  3. 부칙 경과규정 — 1차 후보 부칙 파싱, 경과규정 패턴 탐지
+  3. 부칙 경과규정 — 1차 후보 부칙 파싱, 경과규정 패턴 탐지 (유형 A/B 구분)
   4. 2차 후보 선정 — 경과규정 존재 시 직전 버전을 병렬 후보로 제시
-  5. 상위·하위법 정합성 — (결과 표시 시 law/시행령/시행규칙 시행일 비교 경고)
+  5. 상위·하위법 정합성 — law/시행령/시행규칙 시행일 비교 경고
   6. 사용자 검토   — 자동 확정 불가 시 두 후보 모두 출력 + 플래그
 """
 import logging
@@ -21,14 +21,29 @@ import config
 logger = logging.getLogger(__name__)
 
 # ── 부칙 경과규정 탐지 정규표현식 ────────────────────────────────────────────
-_TRANSITIONAL_PATTERNS: list[re.Pattern] = [
+# 유형 A: 법령 전체 적용 경과규정 ("이 법 시행 전에 공고된 입찰 → 종전 규정 적용")
+_TRANSITIONAL_A_PATTERNS: list[re.Pattern] = [
     re.compile(r"시행\s*전에?\s*(이미\s*)?(입찰\s*공고|공고)"),
     re.compile(r"종전의?\s*규정에\s*따른다"),
-    re.compile(r"최초로\s*입찰\s*공고하는?\s*분부터"),
     re.compile(r"시행\s*당시\s*종전"),
     re.compile(r"이\s*(법|영|규칙)\s*시행\s*전.*?(입찰|공고|계약)"),
-    re.compile(r"개정규정은\s*이\s*(법|영|규칙)\s*시행\s*후\s*최초"),
     re.compile(r"공고된\s*계약.*?종전"),
+]
+
+# 유형 B: 특정 조문 단위 경과규정 ("제○조 개정규정은 시행 후 최초 공고 분부터")
+_TRANSITIONAL_B_PATTERNS: list[re.Pattern] = [
+    re.compile(r"개정규정은\s*이\s*(법|영|규칙)\s*시행\s*후\s*최초"),
+    re.compile(r"최초로\s*입찰\s*공고하는?\s*분부터"),
+]
+
+# 유형 B 경과규정에서 영향받는 조번호 추출
+_ARTICLE_NUM_PATTERN = re.compile(r"제\s*(\d+)\s*조")
+
+# 상위·하위법 정합성 확인 그룹 (display_name 기준 접두사)
+_LAW_FAMILY_GROUPS: list[list[str]] = [
+    ["국가계약법", "국가계약법 시행령", "국가계약법 시행규칙"],
+    ["지방계약법", "지방계약법 시행령", "지방계약법 시행규칙"],
+    ["하도급법", "하도급법 시행령"],
 ]
 
 
@@ -59,9 +74,12 @@ class MatchResult:
     prev_version: Optional[LawVersion]    # 직전 버전 (부칙 해당 시 병렬 제시)
     transitional_flag: bool               # 부칙 경과규정 탐지 여부
     transitional_text: str                # 탐지된 경과규정 발췌문
+    transitional_type: str = ""           # 경과규정 유형: "A" | "B" | "" (미탐지)
+    transitional_articles: list[str] = field(default_factory=list)  # 유형 B: 영향 조번호
     relevant_articles: list[dict] = field(default_factory=list)
     needs_user_review: bool = False       # 사용자 확인 필요
     warning: str = ""                     # 경고 메시지
+    consistency_warning: str = ""         # 5단계: 상위·하위법 시행일 불일치 경고
 
 
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
@@ -172,8 +190,12 @@ class LawMatcher:
 
     # ── 내부 — 분석 ───────────────────────────────────────────────────────────
 
-    def _detect_transitional(self, text: dict) -> tuple[bool, str]:
-        """부칙에서 경과규정 패턴 탐지 → (발견 여부, 발췌문)"""
+    def _detect_transitional(self, text: dict) -> tuple[bool, str, str, list[str]]:
+        """부칙에서 경과규정 패턴 탐지 → (발견 여부, 발췌문, 유형("A"|"B"|""), 영향 조번호 목록)
+
+        유형 A: 법령 전체 적용 — "이 법 시행 전 공고 → 종전 규정 적용"
+        유형 B: 조문 단위 적용 — "제○조 개정규정은 시행 후 최초 공고 분부터"
+        """
         sections = text.get("부칙") or {}
         units = sections.get("부칙단위", [])
         if isinstance(units, dict):
@@ -186,19 +208,41 @@ class LawMatcher:
                 content = " ".join(str(c) for c in content)
             full_text += str(content) + " "
 
-        for pattern in _TRANSITIONAL_PATTERNS:
+        def _excerpt(m: re.Match) -> str:
+            start = max(0, m.start() - 20)
+            end = min(len(full_text), m.end() + 80)
+            return full_text[start:end].strip()
+
+        # 유형 B 먼저 확인 (더 구체적인 패턴)
+        for pattern in _TRANSITIONAL_B_PATTERNS:
             m = pattern.search(full_text)
             if m:
-                start = max(0, m.start() - 20)
-                end = min(len(full_text), m.end() + 60)
-                excerpt = full_text[start:end].strip()
-                logger.warning("경과규정 탐지 — 패턴: %s | 발췌: %s", pattern.pattern, excerpt[:80])
-                return True, excerpt
+                excerpt = _excerpt(m)
+                # 발췌문에서 영향받는 조번호 추출
+                # 발췌 앞 문맥(최대 100자)까지 포함해 조번호 탐색
+                context_start = max(0, m.start() - 100)
+                context = full_text[context_start: m.end() + 20]
+                art_nums = _ARTICLE_NUM_PATTERN.findall(context)
+                logger.warning(
+                    "경과규정 유형 B 탐지 — 패턴: %s | 영향 조: %s | 발췌: %s",
+                    pattern.pattern, art_nums, excerpt[:80],
+                )
+                return True, excerpt, "B", art_nums
 
-        return False, ""
+        # 유형 A 확인
+        for pattern in _TRANSITIONAL_A_PATTERNS:
+            m = pattern.search(full_text)
+            if m:
+                excerpt = _excerpt(m)
+                logger.warning(
+                    "경과규정 유형 A 탐지 — 패턴: %s | 발췌: %s", pattern.pattern, excerpt[:80]
+                )
+                return True, excerpt, "A", []
+
+        return False, "", "", []
 
     def _filter_articles(self, text: dict) -> list[dict]:
-        """공기연장 키워드가 포함된 조문 필터링"""
+        """공기연장 키워드가 포함된 조문 필터링 (호(號) 단위까지 추출)"""
         articles = []
         article_units = (text.get("조문") or {}).get("조문단위", [])
         if isinstance(article_units, dict):
@@ -208,12 +252,35 @@ class LawMatcher:
             title = str(unit.get("조제목") or "")
             content = str(unit.get("조문내용") or "")
 
-            paragraphs = unit.get("항") or []
-            if isinstance(paragraphs, dict):
-                paragraphs = [paragraphs]
-            para_text = " ".join(str(p.get("항내용") or "") for p in paragraphs)
+            paragraphs_raw = unit.get("항") or []
+            if isinstance(paragraphs_raw, dict):
+                paragraphs_raw = [paragraphs_raw]
 
-            combined = title + content + para_text
+            # 항 정규화 + 호(號) 추출
+            paragraphs: list[dict] = []
+            for para in paragraphs_raw:
+                sub_items_raw = para.get("호") or []
+                if isinstance(sub_items_raw, dict):
+                    sub_items_raw = [sub_items_raw]
+                sub_items = [
+                    {
+                        "호번호": str(s.get("호번호") or s.get("subNo") or ""),
+                        "호내용": str(s.get("호내용") or s.get("subContent") or ""),
+                    }
+                    for s in sub_items_raw
+                ]
+                paragraphs.append({
+                    "항번호": str(para.get("항번호") or ""),
+                    "항내용": str(para.get("항내용") or ""),
+                    "호": sub_items,
+                })
+
+            para_text = " ".join(p["항내용"] for p in paragraphs)
+            sub_text = " ".join(
+                s["호내용"] for p in paragraphs for s in p["호"]
+            )
+
+            combined = title + content + para_text + sub_text
             if any(kw in combined for kw in config.EXTENSION_KEYWORDS):
                 articles.append({
                     "조번호": str(unit.get("조번호") or ""),
@@ -226,19 +293,57 @@ class LawMatcher:
 
     # ── 6단계 매칭 로직 ────────────────────────────────────────────────────────
 
+    def _admrul_history(self, mst: str, query: str) -> list[LawVersion]:
+        """행정규칙 연혁 버전 목록 수집 — 3단계 fallback.
+
+        1단계: lawHistory.do (admrul) — API가 지원하면 가장 정확
+        2단계: search_law(display=100) — 다수 버전이 검색 결과에 포함될 수 있음
+        3단계: 빈 목록 반환 (호출자가 현행 버전으로 fallback)
+        """
+        # 1단계: lawHistory.do admrul 시도
+        try:
+            versions = self._get_history(mst, "admrul")
+            if versions:
+                logger.info("[행정규칙 연혁] lawHistory.do 성공: %d건", len(versions))
+                return versions
+        except Exception as exc:
+            logger.debug("[행정규칙 연혁] lawHistory.do 실패: %s", exc)
+
+        # 2단계: search_law 광범위 검색으로 여러 버전 수집
+        try:
+            raw_list = self.client.search_law(query, target="admrul", display=100)
+            versions = [
+                v for raw in raw_list
+                if (v := _raw_to_version(
+                    raw,
+                    str(raw.get("법령MST") or raw.get("MST") or mst),
+                    "admrul",
+                ))
+            ]
+            versions.sort(key=lambda v: v.enforce_date)
+            if versions:
+                logger.info(
+                    "[행정규칙 연혁] search_law fallback 성공: %d건", len(versions)
+                )
+                return versions
+        except Exception as exc:
+            logger.debug("[행정규칙 연혁] search_law fallback 실패: %s", exc)
+
+        return []
+
     def _match_admrul(
         self,
         display_name: str,
         query: str,
         bid_date: date,
     ) -> MatchResult:
-        """행정규칙 전용 매칭 — 법제처 API는 admrul 연혁 조회를 지원하지 않으므로
-        현행(최신) 버전만 조회하고 사용자에게 수동 확인을 요청한다."""
-        logger.warning(
-            "[행정규칙] '%s' — 연혁 조회 불가, 현행 버전만 조회", display_name
-        )
+        """행정규칙 전용 매칭.
 
-        # search_law 한 번으로 MST + 버전 정보를 동시에 확보 (이중 호출 방지)
+        lawHistory.do → search_law 다중 결과 → 현행 버전 순으로 연혁을 확보하고
+        입찰공고일 기준 가장 최근 시행 버전을 선정한다.
+        연혁 확보에 실패한 경우 현행 버전을 표시하고 수동 확인을 요청한다.
+        """
+        # MST + 현행 버전 1건 우선 확보
         laws = self.client.search_law(query, target="admrul", display=10)
         if not laws:
             return MatchResult(
@@ -249,14 +354,51 @@ class LawMatcher:
                 needs_user_review=True,
             )
 
-        # 정확 일치 우선, 없으면 부분 일치
-        raw = next(
+        raw_current = next(
             (l for l in laws if str(l.get("법령명한글") or l.get("법령명") or "") == query),
             None,
         ) or laws[0]
+        mst = str(raw_current.get("법령MST") or raw_current.get("MST") or "")
 
-        mst = str(raw.get("법령MST") or raw.get("MST") or "")
-        version = _raw_to_version(raw, mst, "admrul")
+        # 연혁 수집 시도
+        all_versions = self._admrul_history(mst, query)
+
+        if all_versions:
+            # 입찰공고일 이전 시행 버전 필터
+            candidates = [v for v in all_versions if v.enforce_date <= bid_date]
+            if candidates:
+                primary = candidates[-1]
+                prev_version = candidates[-2] if len(candidates) >= 2 else None
+                history_source = "lawHistory" if len(all_versions) > 1 else "search"
+                logger.info(
+                    "[행정규칙] '%s' — 연혁 %d건 확보(%s), 선정: %s (시행일 %s)",
+                    display_name, len(all_versions), history_source,
+                    primary.announce_num, primary.enforce_date,
+                )
+
+                text = self._get_text(primary)
+                transitional, excerpt, trans_type, trans_articles = self._detect_transitional(text)
+                relevant_articles = self._filter_articles(text)
+
+                return MatchResult(
+                    display_name=display_name,
+                    selected=primary,
+                    prev_version=prev_version,
+                    transitional_flag=transitional,
+                    transitional_text=excerpt,
+                    transitional_type=trans_type,
+                    transitional_articles=trans_articles,
+                    relevant_articles=relevant_articles,
+                    needs_user_review=transitional,
+                    warning=(
+                        "※ 행정규칙 연혁은 부분적으로만 제공될 수 있습니다. "
+                        "실제 시행 버전을 추가 확인하세요."
+                    ) if history_source == "search" else "",
+                )
+
+        # 연혁 확보 실패 — 현행 버전으로 fallback
+        logger.warning("[행정규칙] '%s' — 연혁 확보 실패, 현행 버전 표시", display_name)
+        version = _raw_to_version(raw_current, mst, "admrul")
         if not version:
             return MatchResult(
                 display_name=display_name,
@@ -278,7 +420,7 @@ class LawMatcher:
             relevant_articles=relevant_articles,
             needs_user_review=True,
             warning=(
-                "⚠ 행정규칙은 연혁 조회 불가 — 현행 버전 기준 표시. "
+                "⚠ 행정규칙 연혁 조회 불가 — 현행 버전 기준 표시. "
                 f"입찰공고일({bid_date}) 기준 실제 시행 버전은 수동 확인 필요"
             ),
         )
@@ -340,14 +482,16 @@ class LawMatcher:
             "1차 후보: 공포번호=%s | 시행일=%s", primary.announce_num, primary.enforce_date
         )
 
-        # 3단계 — 부칙 경과규정 확인
+        # 3단계 — 부칙 경과규정 확인 (유형 A/B 구분)
         text = self._get_text(primary)
-        transitional, excerpt = self._detect_transitional(text)
+        transitional, excerpt, trans_type, trans_articles = self._detect_transitional(text)
 
         # 4단계 — 경과규정 존재 시 경고 + 직전 버전 병렬 제시
         if transitional:
+            type_label = f"유형 {trans_type}" if trans_type else "유형 불명"
             logger.warning(
-                "부칙 경과규정 탐지 → 직전 버전(%s) 병렬 제시, 사용자 확인 필요",
+                "부칙 경과규정 탐지(%s) → 직전 버전(%s) 병렬 제시, 사용자 확인 필요",
+                type_label,
                 prev_version.announce_num if prev_version else "없음",
             )
 
@@ -366,9 +510,41 @@ class LawMatcher:
             prev_version=prev_version,
             transitional_flag=transitional,
             transitional_text=excerpt,
+            transitional_type=trans_type,
+            transitional_articles=trans_articles,
             relevant_articles=relevant_articles,
             needs_user_review=needs_review,
         )
+
+    def _check_family_consistency(self, results: list[MatchResult]) -> None:
+        """5단계: 상위·하위법(법률/시행령/시행규칙) 시행일 정합성 확인.
+
+        같은 법령 계열(예: 국가계약법 / 시행령 / 시행규칙)의 시행일이
+        서로 다른 경우 각 MatchResult에 consistency_warning을 추가한다.
+        results 목록을 in-place 수정한다.
+        """
+        result_by_name = {r.display_name: r for r in results}
+
+        for family in _LAW_FAMILY_GROUPS:
+            members = [result_by_name[name] for name in family if name in result_by_name]
+            # 시행일을 확인할 수 있는 것만
+            dated = [(m, m.selected.enforce_date) for m in members if m.selected]
+            if len(dated) < 2:
+                continue
+
+            dates = {d for _, d in dated}
+            if len(dates) == 1:
+                continue  # 모두 동일 — 정상
+
+            # 불일치: 각 결과에 경고 추가
+            date_summary = ", ".join(
+                f"{m.display_name}={d}" for m, d in dated
+            )
+            warn_msg = f"⚠ 상위·하위법 시행일 불일치 — {date_summary}"
+            logger.warning("정합성 경고: %s", warn_msg)
+            for m, _ in dated:
+                m.consistency_warning = warn_msg
+                m.needs_user_review = True
 
     def match_all(
         self,
@@ -394,6 +570,9 @@ class LawMatcher:
                 progress_callback(i, total, display_name)
             result = self.match_one(display_name, query, target, bid_date)
             results.append(result)
+
+        # 5단계 — 상위·하위법 정합성 확인 (전체 결과 수집 후 일괄 처리)
+        self._check_family_consistency(results)
 
         if progress_callback:
             progress_callback(total, total, "완료")
