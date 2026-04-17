@@ -143,14 +143,48 @@ def try_open_file(filepath: Path) -> tuple:
         elif ext == ".docx":
             import docx
             doc = docx.Document(_lib_path(filepath))
-            has = bool(doc.paragraphs or doc.tables)
-            return ("", "") if has else ("파일 손상 (내용 없음)", "")
+            all_text = "\n".join(p.text for p in doc.paragraphs)
+            if not all_text.strip() and not doc.tables:
+                return ("파일 손상 (내용 없음)", "")
+            warn = _check_garbled(all_text)
+            return (warn, "") if warn else ("", "")
 
         # ── PowerPoint
         elif ext == ".pptx":
+            raw_sig = filepath.read_bytes()[:8]
+            # OLE2 시그니처 → 확장자는 .pptx지만 실제 포맷은 구형 .ppt (OLE 기반) 또는 IRM/DRM
+            if raw_sig == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+                try:
+                    import olefile
+                    ole = olefile.OleFileIO(_lib_path(filepath))
+                    all_streams = ole.listdir()
+                    # IRM/DRM 스트림 감지 (DRMEncryptedDataSpace, EncryptedPackage 등)
+                    irm_streams = ("drm", "encrypt", "dataspace", "rights", "_wmcs")
+                    for entry in all_streams:
+                        entry_str = "/".join(entry).lower()
+                        if any(kw in entry_str for kw in irm_streams):
+                            ole.close()
+                            return ("열기 실패 (보안 문서: IRM/DRM 보호)", "")
+                    # 일반 .ppt 포맷 확인
+                    has_ppt = ole.exists("PowerPoint Document")
+                    ole.close()
+                    return ("", "") if has_ppt else ("파일 손상 (PowerPoint Document 스트림 없음)", "")
+                except Exception as e:
+                    return (f"열기 실패 ({type(e).__name__})", "")
+            # 정상 ZIP 기반 .pptx
             from pptx import Presentation
             prs = Presentation(_lib_path(filepath))
-            return ("", "") if len(prs.slides) > 0 else ("파일 손상 (내용 없음)", "")
+            if len(prs.slides) == 0:
+                return ("파일 손상 (내용 없음)", "")
+            # 슬라이드 전체 텍스트 추출 후 깨짐 검사
+            texts = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        texts.append(shape.text_frame.text)
+            all_text = "\n".join(texts)
+            warn = _check_garbled(all_text)
+            return (warn, "") if warn else ("", "")
 
         # ── PDF
         elif ext == ".pdf":
@@ -162,25 +196,135 @@ def try_open_file(filepath: Path) -> tuple:
             first_text = doc[0].get_text().lower()
             aip_kw = ["azure information protection", "this is a protected document",
                       "microsoft information protection", "rights management", "irm protected"]
-            if any(kw in first_text for kw in aip_kw):
+            # 한국형 PDF DRM (Markany, SyncEZ 등) — 1페이지 DRM 안내 메시지 패턴
+            krdrm_kw = ["보호된 pdf", "보호된pdf", "뷰어 프로그램을 설치", "뷰어프로그램을 설치",
+                        "전용 뷰어", "drm 보호", "drm보호", "문서보안", "문서 보안 솔루션",
+                        "syncez", "markany", "fasoo", "irm viewer"]
+            if any(kw in first_text for kw in aip_kw + krdrm_kw):
                 doc.close()
                 return ("열기 실패 (보안 문서: AIP/DRM 보호)", "")
             sample = min(doc.page_count, 5)
-            total_chars = sum(len(doc[i].get_text().strip()) for i in range(sample))
+            page_texts = [doc[i].get_text() for i in range(sample)]
+            total_chars = sum(len(t.strip()) for t in page_texts)
+            all_text = "\n".join(page_texts)
             doc.close()
-            ftype = "Adobe Acrobat 문서 (텍스트)" if total_chars / sample >= 50 else "Adobe Acrobat 문서 (스캔본)"
-            return ("", ftype)
+            if total_chars / sample >= 50:
+                ftype = "Adobe Acrobat 문서 (텍스트)"
+                warn = _check_garbled(all_text)
+                return (warn, ftype) if warn else ("", ftype)
+            return ("", "Adobe Acrobat 문서 (스캔본)")
 
         # ── 이메일
         elif ext in (".msg", ".eml"):
             return ("", "") if size > 100 else ("파일 손상 (내용 없음)", "")
 
+        # ── Word (구형 .doc) — olefile
+        elif ext == ".doc":
+            try:
+                import olefile
+                if not olefile.isOleFile(_lib_path(filepath)):
+                    return ("파일 손상 (OLE 구조 오류)", "")
+                ole = olefile.OleFileIO(_lib_path(filepath))
+                all_streams = ole.listdir()
+                # IRM/DRM 스트림 감지
+                irm_streams = ("drm", "encrypt", "dataspace", "rights", "_wmcs")
+                for entry in all_streams:
+                    if any(kw in "/".join(entry).lower() for kw in irm_streams):
+                        ole.close()
+                        return ("열기 실패 (보안 문서: IRM/DRM 보호)", "")
+                if not ole.exists("WordDocument"):
+                    ole.close()
+                    return ("파일 손상 (WordDocument 스트림 없음)", "")
+                ole.close()
+                return ("", "")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
+
+        # ── PowerPoint (구형 .ppt) — olefile
+        elif ext == ".ppt":
+            try:
+                import olefile
+                if not olefile.isOleFile(_lib_path(filepath)):
+                    return ("파일 손상 (OLE 구조 오류)", "")
+                ole = olefile.OleFileIO(_lib_path(filepath))
+                all_streams = ole.listdir()
+                # IRM/DRM 스트림 감지
+                irm_streams = ("drm", "encrypt", "dataspace", "rights", "_wmcs")
+                for entry in all_streams:
+                    if any(kw in "/".join(entry).lower() for kw in irm_streams):
+                        ole.close()
+                        return ("열기 실패 (보안 문서: IRM/DRM 보호)", "")
+                if not ole.exists("PowerPoint Document"):
+                    ole.close()
+                    return ("파일 손상 (PowerPoint Document 스트림 없음)", "")
+                ole.close()
+                return ("", "")
+            except Exception as e:
+                return (f"열기 실패 ({type(e).__name__})", "")
+
         # ── 한글 문서
         elif ext in (".hwp", ".hwpx"):
-            # HWP는 버전마다 내부 구조가 달라 한글 프로그램 없이 손상 여부를 확인하기 어려움
-            # 파일을 읽을 수 있고 빈 파일이 아니면 정상으로 판단 (빈 파일은 앞서 처리됨)
             try:
-                filepath.read_bytes()
+                raw = filepath.read_bytes()
+                # Microsoft RMS/AIP .pfile 컨테이너 (HWP + AIP 암호화)
+                if raw[:6] == b'.pfile':
+                    return ("열기 실패 (보안 문서: AIP/DRM 보호)", "")
+                # HWP 5.x: OLE2 기반 (D0CF11E0 시그니처)
+                if raw[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+                    import olefile
+                    if not olefile.isOleFile(_lib_path(filepath)):
+                        return ("파일 손상 (OLE 구조 오류)", "")
+                    ole = olefile.OleFileIO(_lib_path(filepath))
+                    # 암호화 스트림 확인
+                    all_streams = ole.listdir()
+                    enc_keywords = ("encrypt", "security", "drm", "protect")
+                    for entry in all_streams:
+                        entry_str = "/".join(entry).lower()
+                        if any(kw in entry_str for kw in enc_keywords):
+                            ole.close()
+                            return ("열기 실패 (암호 보호)", "")
+                    # HWP 핵심 스트림 존재 확인
+                    if not ole.exists("FileHeader"):
+                        ole.close()
+                        return ("파일 손상 (HWP FileHeader 없음)", "")
+                    # BodyText 본문 스트림 검사
+                    if not ole.exists("BodyText/Section0"):
+                        ole.close()
+                        return ("파일 손상 (HWP 본문 없음)", "")
+                    raw_section = ole.openstream("BodyText/Section0").read()
+                    ole.close()
+                    # ParaText 레코드 파싱으로 실제 텍스트 추출 후 깨짐 검사
+                    hwp_text = _extract_hwp_text(raw_section)
+                    warn = _check_garbled(hwp_text)
+                    if warn:
+                        return (warn, "")
+                # HWPX: ZIP 기반 (PK 시그니처)
+                elif raw[:2] == b'PK':
+                    import xml.etree.ElementTree as _ET
+                    if not zipfile.is_zipfile(str(filepath)):
+                        return ("파일 손상 (ZIP 구조 오류)", "")
+                    with zipfile.ZipFile(str(filepath)) as z:
+                        section_files = sorted(
+                            n for n in z.namelist()
+                            if n.startswith("Contents/section") and n.endswith(".xml")
+                        )
+                        if not section_files:
+                            return ("파일 손상 (HWPX 본문 없음)", "")
+                        texts = []
+                        for sname in section_files[:3]:
+                            try:
+                                xml_bytes = z.read(sname)
+                                root = _ET.fromstring(xml_bytes)
+                                for elem in root.iter():
+                                    if elem.tag.endswith("}t") or elem.tag == "t":
+                                        if elem.text:
+                                            texts.append(elem.text)
+                            except _ET.ParseError:
+                                return ("파일 손상 (HWPX XML 오류)", "")
+                    all_text = "\n".join(texts)
+                    warn = _check_garbled(all_text)
+                    if warn:
+                        return (warn, "")
                 return ("", "")
             except Exception as e:
                 return (f"열기 실패 ({type(e).__name__})", "")
@@ -318,6 +462,8 @@ def try_open_file(filepath: Path) -> tuple:
             return ("열기 실패 (로그인 필요)", "")
         elif "corrupt" in msg or "invalid" in msg or "truncat" in msg:
             return ("파일 손상 (파일 오류)", "")
+        elif type(e).__name__ in ("FileDataError",):
+            return ("파일 손상 또는 보호된 파일 (열기 실패)", "")
         else:
             return (f"열기 실패 ({type(e).__name__})", "")
 
@@ -380,6 +526,72 @@ def _lib_path(p: Path) -> str:
     if s.startswith("\\\\?\\"):
         s = s[4:]
     return s
+
+
+def _extract_hwp_text(raw_section: bytes) -> str:
+    """
+    HWP 5.x BodyText/Section0 스트림에서 텍스트를 추출한다.
+    - zlib raw deflate 압축 해제 후 HWP 레코드를 순회
+    - ParaText 레코드 (태그 ID = 67) 의 데이터를 UTF-16LE 로 디코딩
+    """
+    import zlib
+    try:
+        data = zlib.decompress(raw_section, -15)
+    except zlib.error:
+        data = raw_section  # 비압축 모드
+
+    TAG_PARA_TEXT = 67
+    texts = []
+    pos = 0
+    while pos + 4 <= len(data):
+        header = int.from_bytes(data[pos:pos + 4], "little")
+        tag_id = header & 0x3FF
+        size   = (header >> 20) & 0xFFF
+        pos += 4
+        if size == 0xFFF:            # 확장 크기 필드
+            if pos + 4 > len(data):
+                break
+            size = int.from_bytes(data[pos:pos + 4], "little")
+            pos += 4
+        if pos + size > len(data):
+            break
+        if tag_id == TAG_PARA_TEXT and size > 0:
+            try:
+                texts.append(data[pos:pos + size].decode("utf-16-le", errors="replace"))
+            except Exception:
+                pass
+        pos += size
+    return "\n".join(texts)
+
+
+def _garbling_ratio(text: str) -> float:
+    """
+    텍스트에서 깨진 문자 비율을 반환 (0.0 ~ 1.0).
+    - U+FFFD (대체문자): 인코딩 변환 실패 시 생성
+    - 제어문자 (탭·개행·CR 제외): 바이너리가 텍스트 필드에 흘러든 경우
+    """
+    if not text:
+        return 0.0
+    bad = sum(
+        1 for c in text
+        if c == "\ufffd" or (ord(c) < 32 and c not in "\t\n\r")
+    )
+    return bad / len(text)
+
+
+def _check_garbled(text: str, min_len: int = 30, threshold: float = 0.15) -> str:
+    """
+    텍스트 깨짐 여부를 검사.
+    - min_len 미만이면 판단 보류 (빈 문서는 별도 처리)
+    - 깨짐 비율이 threshold 이상이면 경고 문자열 반환, 정상이면 ""
+    """
+    text = text.strip()
+    if len(text) < min_len:
+        return ""
+    ratio = _garbling_ratio(text)
+    if ratio >= threshold:
+        return f"내용 깨짐 의심 (깨진 문자 {ratio:.0%})"
+    return ""
 
 
 def ext_to_label(ext: str) -> str:

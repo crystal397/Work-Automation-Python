@@ -41,6 +41,7 @@ python work/
 │   ├── pdf_merger_essential_numbers.py
 │   ├── pdf_merger_v2.py
 │   ├── pdf_merger_v3.py
+│   ├── pdf_merger_v4.py              ← 최신: 폴더에만 간지, 파일은 간지 없음
 │   ├── pdf_merger_with_bookmark.py
 │   └── pdf_size_splitter.py
 │
@@ -284,10 +285,13 @@ python main.py
 - 폴더 깊이에 따른 자동 번호 부여 (1., 1.1., 1.1.1.)
 - Excel → PDF 일괄 변환 (Excel COM)
 - 한글 폰트 폴백 (한컴바탕 → 맑은 고딕 → 나눔명조)
+- **v4**: 폴더에만 간지 삽입, 파일(PDF/Excel)은 간지 없이 바로 추가
+- **v3**: 폴더·파일 모두 간지 삽입, 초기 갑지 커스텀 + 시작 번호 지정
 - PyInstaller로 EXE 빌드 가능 (`build.ps1`)
 
 ```bash
-python pdf_merger.py [폴더경로] [출력파일.pdf]
+python pdf_merger_v4.py   # GUI 실행 (폴더에만 간지)
+python pdf_merger_v3.py   # GUI 실행 (폴더·파일 모두 간지)
 ```
 
 **의존성**: reportlab, pypdf, pywin32
@@ -299,7 +303,12 @@ python pdf_merger.py [폴더경로] [출력파일.pdf]
 폴더 내 파일을 재귀 탐색하여 상태를 검사하고 Excel 보고서 생성.
 
 - Excel / Word / PDF / PPT / ZIP / 7Z / RAR 포맷별 검사
-- 오류 분류: 빈 파일, 손상, 암호화, AIP/DRM
+- 오류 분류: 빈 파일, 손상, 암호화, AIP/DRM, IRM/DRM, 내용 깨짐
+- `.doc`/`.ppt`: OLE2 구조 + 핵심 스트림 검증 + IRM/DRM 스트림 감지
+- `.hwp`: `.pfile` RMS/AIP 감지, OLE 구조 + FileHeader + BodyText 검증, HWP ParaText 레코드 파싱으로 텍스트 깨짐 검사
+- `.hwpx`: section XML 파싱 → 텍스트 추출 후 깨짐 비율 검사
+- `.pdf`: 한국형 PDF DRM(Markany·SyncEZ 등) 1페이지 안내 패턴 감지
+- `.docx`/`.pptx`: 텍스트 추출 후 깨짐 비율(15% 이상) 경고
 - 압축 파일 내부까지 재귀 검사, 인코딩 자동 감지 (UTF-8/CP949)
 - Windows 260자 경로 제한 우회 (UNC 경로)
 
@@ -307,7 +316,7 @@ python pdf_merger.py [폴더경로] [출력파일.pdf]
 python check_files.py
 ```
 
-**의존성**: openpyxl, python-docx, python-pptx, PyMuPDF, py7zr, rarfile
+**의존성**: openpyxl, python-docx, python-pptx, PyMuPDF, olefile, py7zr, rarfile
 
 ---
 
