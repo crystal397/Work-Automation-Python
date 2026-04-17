@@ -193,10 +193,9 @@ class WordReportGenerator:
             # 버전 선정 근거
             basis_p = self.doc.add_paragraph()
             if v.target == "admrul":
-                # 연혁 확보 성공 여부: prev_version이 있거나 warning에 "연혁 조회 불가"가 없으면 성공
-                history_found = r.prev_version is not None or (
-                    r.warning and "연혁 조회 불가" not in r.warning
-                )
+                # 연혁 조회 불가 = warning에 "연혁 조회 불가" 문구가 있는 경우만
+                # (warning이 빈 문자열이면 API 연혁 성공, 다른 문구면 scraper/search 성공)
+                history_found = "연혁 조회 불가" not in (r.warning or "")
                 if history_found:
                     run_b = basis_p.add_run(
                         f"[선정 근거] 행정규칙 — 입찰공고일({self._bid_date}) 기준 "
