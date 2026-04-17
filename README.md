@@ -167,6 +167,19 @@ python work/
 │   ├── kosca_crawler.py
 │   └── land_price_lookup.py
 │
+├── 22_laws_import/
+│   ├── README.md
+│   ├── main.py              ← 진입점
+│   ├── gui.py               ← Tkinter GUI
+│   ├── engine.py            ← 6단계 시행일 판단 엔진
+│   ├── api_client.py        ← 법제처 API 클라이언트
+│   ├── cache.py             ← SQLite 캐시
+│   ├── report.py            ← Word 리포트 생성
+│   ├── config.py            ← API 설정·대상 법령·키워드
+│   ├── .env.example
+│   ├── requirements.txt
+│   └── requirements.md      ← 요구사항 정의서
+│
 └── 23_excel_margins/
     ├── adjust_excel_margins.py   ← 여백 조정 + GUI 진입점
     ├── build.bat                 ← PyInstaller EXE 빌드
@@ -568,6 +581,26 @@ python adjust_excel_margins.py "경로"   # CLI 실행
 ```
 
 **의존성**: openpyxl, tkinter (내장)
+
+---
+
+### 22. 입찰공고일 기준 법령 자동 매칭
+
+공기연장 보고서 작성 시, 입찰공고일 시점에 실제로 시행 중이던 법령 버전을 자동 매칭하고 관련 조문 원문을 추출.
+
+- **6단계 판단 로직**: 연혁조회 → 1차 후보 → 부칙 경과규정 탐지(전체/조문 단위 구분) → 2차 후보 → 정합성 확인 → 사용자 검토
+- **14개 법령 대상**: 국가·지방계약법(법률·시행령·시행규칙), 조달사업법, 하도급법, 공사계약일반조건 외 회계예규·고시
+- **할루시네이션 방지**: 법제처 API 원문만 인용, AI 재작성 없음, 공포번호·시행일 5요소 추적
+- **공기연장 키워드 26개**: 공기연장·간접비·지체상금·설계변경·귀책사유 등으로 관련 조문 자동 필터
+- SQLite 캐시(7일 TTL), Word 리포트 출력, 감사 로그 기록
+- API 키는 `.env`로 관리 (`LAW_API_OC`)
+
+```bash
+python main.py   # GUI 실행
+```
+
+**의존성**: requests, xmltodict, python-docx, python-dotenv, tkcalendar
+**API**: 법제처 국가법령정보 공동활용 (open.law.go.kr — 사전 승인 필요)
 
 ---
 
