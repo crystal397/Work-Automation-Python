@@ -780,7 +780,7 @@ class LawMatcher:
         target: str,
         bid_date: date,
     ) -> MatchResult:
-        """단일 법령에 대한 6단계 시행일 매칭 실행"""
+        """단일 법령에 대한 5단계 시행일 매칭 실행"""
         logger.info("─── [매칭 시작] %s | 입찰공고일: %s ───", display_name, bid_date)
 
         # 행정규칙은 연혁 API 미지원 → 전용 메서드로 분기
