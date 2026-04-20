@@ -18,7 +18,7 @@ from typing import Callable, Optional
 
 from api_client import LawAPIClient
 from cache import LawCache
-from scraper import scrape_admrul_history
+from scraper import scrape_admrul_history, scrape_law_history
 import config
 
 logger = logging.getLogger(__name__)
@@ -105,21 +105,40 @@ def _parse_date(s: str) -> date:
 
 
 def _raw_to_version(raw: dict, mst: str, target: str) -> Optional[LawVersion]:
-    """API 응답 raw dict → LawVersion. 실패 시 None."""
+    """API 응답 raw dict → LawVersion. 실패 시 None.
+
+    법령(law)과 행정규칙(admrul)은 필드명이 다름:
+      law   : 법령ID, 법령MST/법령일련번호, 법령명한글, 공포일자, 공포번호
+      admrul: 행정규칙일련번호, 행정규칙ID, 행정규칙명, 발령일자, 발령번호
+    """
     try:
         enforce_str = str(raw.get("시행일자") or "").strip()
         if not enforce_str:
             return None
-        announce_str = str(raw.get("공포일자") or "").strip()
-        return LawVersion(
-            law_id=str(raw.get("법령ID") or raw.get("ID") or ""),
-            mst=str(raw.get("법령MST") or mst),
-            name=str(raw.get("법령명한글") or raw.get("법령명") or ""),
-            target=target,
-            announce_num=str(raw.get("공포번호") or ""),
-            announce_date=_parse_date(announce_str) if announce_str else date(1900, 1, 1),
-            enforce_date=_parse_date(enforce_str),
-        )
+
+        if target == "admrul":
+            announce_str = str(raw.get("발령일자") or raw.get("공포일자") or "").strip()
+            return LawVersion(
+                law_id=str(raw.get("행정규칙일련번호") or raw.get("법령ID") or raw.get("ID") or ""),
+                mst=str(raw.get("행정규칙ID") or raw.get("법령MST") or mst),
+                name=str(raw.get("행정규칙명") or raw.get("법령명한글") or raw.get("법령명") or ""),
+                target=target,
+                announce_num=str(raw.get("발령번호") or raw.get("공포번호") or ""),
+                announce_date=_parse_date(announce_str) if announce_str else date(1900, 1, 1),
+                enforce_date=_parse_date(enforce_str),
+            )
+        else:
+            announce_str = str(raw.get("공포일자") or "").strip()
+            return LawVersion(
+                law_id=str(raw.get("법령ID") or raw.get("ID") or ""),
+                # lawSearch 응답에는 법령MST 대신 법령일련번호로 내려옴
+                mst=str(raw.get("법령MST") or raw.get("MST") or raw.get("법령일련번호") or mst),
+                name=str(raw.get("법령명한글") or raw.get("법령명") or ""),
+                target=target,
+                announce_num=str(raw.get("공포번호") or ""),
+                announce_date=_parse_date(announce_str) if announce_str else date(1900, 1, 1),
+                enforce_date=_parse_date(enforce_str),
+            )
     except Exception as exc:
         logger.debug("버전 파싱 스킵: %s — %s", raw, exc)
         return None
@@ -146,7 +165,8 @@ class LawMatcher:
         laws = self.client.search_law(query, target=target, display=10)
         for law in laws:
             name = str(law.get("법령명한글") or law.get("법령명") or "")
-            mst = str(law.get("법령MST") or law.get("MST") or "")
+            # lawSearch 응답: law → 법령일련번호, admrul → 행정규칙ID
+            mst = str(law.get("법령MST") or law.get("MST") or law.get("법령일련번호") or "")
             # 정확히 일치하는 것 우선, 없으면 부분 일치 허용
             if name == query and mst:
                 self.cache.set(cache_key, mst)
@@ -154,7 +174,7 @@ class LawMatcher:
                 return mst
         for law in laws:
             name = str(law.get("법령명한글") or law.get("법령명") or "")
-            mst = str(law.get("법령MST") or law.get("MST") or "")
+            mst = str(law.get("법령MST") or law.get("MST") or law.get("법령일련번호") or "")
             if query in name and mst:
                 self.cache.set(cache_key, mst)
                 logger.info("MST 확인(부분): %s → %s (name=%s)", query, mst, name)
@@ -172,7 +192,12 @@ class LawMatcher:
         if cached is not None:
             raw_list = cached
         else:
-            raw_list = self.client.get_law_history(mst, target=target)
+            try:
+                raw_list = self.client.get_law_history(mst, target=target)
+            except Exception as exc:
+                # lawHistory.do가 404 등으로 실패해도 빈 목록으로 처리
+                logger.warning("연혁 API 호출 실패 (mst=%s, target=%s): %s", mst, target, exc)
+                raw_list = []
             if raw_list:
                 self.cache.set(cache_key, raw_list)
 
@@ -225,6 +250,19 @@ class LawMatcher:
             unit_texts.append(str(content))
 
         full_text = " ".join(unit_texts)
+
+        # admrul: 별도 부칙 구조 없이 조문내용 배열에 부칙이 포함됨
+        if not full_text.strip():
+            raw_contents = text.get("조문내용") or []
+            if isinstance(raw_contents, str):
+                raw_contents = [raw_contents]
+            부칙_items = [
+                str(c) for c in raw_contents
+                if any(kw in str(c) for kw in ("부칙", "경과규정", "종전", "시행 전", "시행전"))
+            ]
+            if 부칙_items:
+                unit_texts = 부칙_items
+                full_text = " ".join(부칙_items)
 
         def _excerpt(text_src: str, m: re.Match) -> str:
             start = max(0, m.start() - 20)
@@ -333,14 +371,38 @@ class LawMatcher:
         return False, "", "", []
 
     def _filter_articles(self, text: dict) -> list[dict]:
-        """공기연장 키워드가 포함된 조문 필터링 (호(號) 단위까지 추출)"""
+        """공기연장 키워드가 포함된 조문 필터링 (호(號) 단위까지 추출)
+
+        법령(law): 조문단위 구조 (조문번호·조문제목·항·호·목)
+        행정규칙(admrul): 조문내용 문자열 배열 (구조화 없이 전문 텍스트)
+        """
         articles = []
+
+        # ── admrul: 조문내용이 문자열 배열로 직접 제공됨 ───────────────────────
+        raw_admrul = text.get("조문내용")
+        if raw_admrul is not None:
+            if isinstance(raw_admrul, str):
+                raw_admrul = [raw_admrul]
+            for content_str in (str(c) for c in raw_admrul):
+                if any(kw in content_str for kw in config.EXTENSION_KEYWORDS):
+                    m_num = re.match(r"제\s*(\d+)\s*조", content_str)
+                    m_title = re.match(r"제\s*\d+\s*조\(([^)]+)\)", content_str)
+                    articles.append({
+                        "조번호": m_num.group(1) if m_num else "",
+                        "조제목": m_title.group(1) if m_title else "",
+                        "조문내용": content_str,
+                        "항": [],
+                    })
+            return articles
+
+        # ── law: 구조화된 조문단위 ─────────────────────────────────────────────
         article_units = (text.get("조문") or {}).get("조문단위", [])
         if isinstance(article_units, dict):
             article_units = [article_units]
 
         for unit in article_units:
-            title = str(unit.get("조제목") or "")
+            # API 필드명: 조문제목, 조문번호 (law 응답 기준)
+            title = str(unit.get("조문제목") or unit.get("조제목") or "")
             content = str(unit.get("조문내용") or "")
 
             paragraphs_raw = unit.get("항") or []
@@ -380,20 +442,16 @@ class LawMatcher:
                 })
 
             para_text = " ".join(p["항내용"] for p in paragraphs)
-            sub_text = " ".join(
-                s["호내용"] for p in paragraphs for s in p["호"]
-            )
+            sub_text = " ".join(s["호내용"] for p in paragraphs for s in p["호"])
             subsub_text = " ".join(
-                ss["목내용"]
-                for p in paragraphs
-                for s in p["호"]
-                for ss in s["목"]
+                ss["목내용"] for p in paragraphs for s in p["호"] for ss in s["목"]
             )
 
             combined = title + content + para_text + sub_text + subsub_text
             if any(kw in combined for kw in config.EXTENSION_KEYWORDS):
                 articles.append({
-                    "조번호": str(unit.get("조번호") or ""),
+                    # 내부 키명은 조번호/조제목 유지 (report.py·gui.py 호환)
+                    "조번호": str(unit.get("조문번호") or unit.get("조번호") or ""),
                     "조제목": title,
                     "조문내용": content,
                     "항": paragraphs,
@@ -433,13 +491,17 @@ class LawMatcher:
             logger.debug("[행정규칙 연혁] 스크래핑 실패: %s", exc)
 
         # 3단계: search_law 광범위 검색으로 여러 버전 수집
+        # lawSearch.do는 현행+연혁 버전 모두 반환하며, 같은 행정규칙ID를 공유함
         try:
             raw_list = self.client.search_law(query, target="admrul", display=100)
+            # 같은 행정규칙ID 계열만 선택 (다른 규칙이 같은 검색어에 걸리는 경우 배제)
+            same_series = [r for r in raw_list if str(r.get("행정규칙ID") or "") == mst]
+            target_list = same_series if same_series else raw_list
             versions = [
-                v for raw in raw_list
+                v for raw in target_list
                 if (v := _raw_to_version(
                     raw,
-                    str(raw.get("법령MST") or raw.get("MST") or mst),
+                    str(raw.get("행정규칙ID") or mst),
                     "admrul",
                 ))
             ]
@@ -477,11 +539,15 @@ class LawMatcher:
                 needs_user_review=True,
             )
 
-        raw_current = next(
-            (l for l in laws if str(l.get("법령명한글") or l.get("법령명") or "") == query),
-            None,
-        ) or laws[0]
-        mst = str(raw_current.get("법령MST") or raw_current.get("MST") or "")
+        # 행정규칙명은 "(계약예규) 공사계약일반조건" 형태로 앞에 종류 prefix가 붙으므로
+        # query(=검색어)가 name에 포함되는지로 매칭 (정확 일치 우선, 부분 일치 fallback)
+        raw_current = (
+            next((l for l in laws if str(l.get("행정규칙명") or l.get("법령명한글") or "") == query), None)
+            or next((l for l in laws if query in str(l.get("행정규칙명") or l.get("법령명한글") or "")), None)
+            or laws[0]
+        )
+        # 행정규칙 MST 역할: 행정규칙ID (버전 불문 동일 계열 식별자)
+        mst = str(raw_current.get("행정규칙ID") or raw_current.get("법령MST") or raw_current.get("MST") or "")
 
         # 연혁 수집 시도 (B1 수정: source 명시 추적)
         all_versions, history_source = self._admrul_history(mst, query)
@@ -597,11 +663,28 @@ class LawMatcher:
 
         all_versions = self._get_history(mst, target)
         if not all_versions:
+            # lawHistory.do 404 → 웹 스크래핑 fallback
+            try:
+                raw_list = scrape_law_history(mst)
+                scraped = [
+                    v for raw in raw_list
+                    if (v := _raw_to_version(raw, mst, target))
+                ]
+                scraped.sort(key=lambda v: v.enforce_date)
+                if scraped:
+                    all_versions = scraped
+                    logger.info("[법령 연혁] 웹 스크래핑 성공: %d건", len(all_versions))
+                else:
+                    logger.warning("[법령 연혁] 웹 스크래핑 결과 없음 (mst=%s)", mst)
+            except Exception as exc:
+                logger.warning("[법령 연혁] 웹 스크래핑 실패 (mst=%s): %s", mst, exc)
+
+        if not all_versions:
             return MatchResult(
                 display_name=display_name,
                 selected=None, prev_version=None,
                 transitional_flag=False, transitional_text="",
-                warning=f"연혁 법령 없음: '{query}'",
+                warning=f"연혁 법령 없음: '{query}' — API 및 웹 스크래핑 모두 실패",
                 needs_user_review=True,
             )
 

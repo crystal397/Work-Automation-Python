@@ -89,11 +89,16 @@ class LawAPIClient:
             "lawSearch.do",
             {"target": target, "query": query, "display": display},
         )
-        result = data.get("LawSearch", {}) or {}
-        laws = result.get("law", [])
-        if isinstance(laws, dict):
-            laws = [laws]
-        return laws or []
+        # 행정규칙은 루트 요소와 항목 키가 법령과 다름
+        if target == "admrul":
+            result = data.get("AdmRulSearch", {}) or {}
+            items = result.get("admrul", [])
+        else:
+            result = data.get("LawSearch", {}) or {}
+            items = result.get("law", [])
+        if isinstance(items, dict):
+            items = [items]
+        return items or []
 
     def get_law_history(self, mst: str, target: str = "law") -> list[dict]:
         """연혁 법령 전체 목록 조회 (공포번호·공포일·시행일 포함)
@@ -121,9 +126,12 @@ class LawAPIClient:
             target: "law" 또는 "admrul"
 
         Returns:
-            '법령' 루트 dict. 기본정보 / 조문 / 부칙 하위 구조 포함.
+            law   → '법령' 루트 dict (기본정보 / 조문단위 / 부칙단위 구조)
+            admrul→ 'AdmRulService' 루트 dict (행정규칙기본정보 / 조문내용 배열)
         """
         data = self._get("lawService.do", {"target": target, "ID": law_id})
+        if target == "admrul":
+            return data.get("AdmRulService", {}) or {}
         return data.get("법령", {}) or {}
 
     def get_admrul_text(self, law_id: str) -> dict:
