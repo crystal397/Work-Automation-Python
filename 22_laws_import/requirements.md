@@ -201,7 +201,7 @@
 | 항목 | 내용 |
 |---|---|
 | 언어 | Python 3.10 이상 |
-| 주요 라이브러리 | `requests` (API 호출), `xmltodict` (XML 파싱), `sqlite3` (캐시), `python-docx` (Word 리포트), `python-dotenv` (`.env` 로드), `tkcalendar` (날짜 선택 달력, 옵셔널), `beautifulsoup4` (admrul 연혁 웹 스크래핑, 옵셔널), `selenium>=4.6.0` (JS 렌더링 페이지 스크래핑, 옵셔널 — Selenium Manager가 chromedriver 자동 관리), `pyinstaller` (exe 빌드) |
+| 주요 라이브러리 | `requests` (API 호출), `xmltodict` (XML 파싱), `sqlite3` (캐시), `python-docx` (Word 리포트), `python-dotenv` (`.env` 로드), `customtkinter` (모던 GUI 프레임워크), `tkcalendar` (날짜 선택 달력, 옵셔널), `beautifulsoup4` (admrul 연혁 웹 스크래핑, 옵셔널), `selenium>=4.6.0` (JS 렌더링 페이지 스크래핑, 옵셔널 — Selenium Manager가 chromedriver 자동 관리), `pyinstaller` (exe 빌드) |
 | 패키징 | PyInstaller로 Windows용 단일 exe 빌드 (`--onefile` 옵션) |
 | 외부 API | 법제처 국가법령정보 (§2에서 경로 확정) |
 | 대상 OS | Windows 10 / 11 (우선), macOS는 Python 스크립트로 실행 |
