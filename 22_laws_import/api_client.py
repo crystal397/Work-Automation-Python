@@ -182,7 +182,7 @@ class LawAPIClient:
                     "공포일자": _norm_date(cells[6]),
                     "시행일자": _norm_date(cells[7]),
                     "법령일련번호": lsi,
-                    "법령ID": lsi,   # 본문 조회(lawService.do?ID=) 에 동일 값 사용
+                    "법령ID": lsi,   # 본문 조회(lawService.do?MST=) 에 동일 값 사용
                     "현행연혁코드": "현행" if "현행" in cells[-1] else "연혁",
                 }
                 all_items.append(item)
@@ -197,16 +197,23 @@ class LawAPIClient:
         """법령 본문 조회 — 조문 + 부칙 포함
 
         Args:
-            law_id: 법령ID (버전별 고유 번호, lawSearch/lawHistory에서 획득)
+            law_id: 법령일련번호(lsiSeq) — law 타입: lsHistory에서 추출한 값
+                    행정규칙ID — admrul 타입: lawSearch admrul 응답의 행정규칙일련번호
             target: "law" 또는 "admrul"
 
         Returns:
             law   → '법령' 루트 dict (기본정보 / 조문단위 / 부칙단위 구조)
             admrul→ 'AdmRulService' 루트 dict (행정규칙기본정보 / 조문내용 배열)
+
+        Note:
+            law 타입: lawService.do?MST=법령일련번호 사용 — 연혁 버전 본문을 올바르게 조회
+            admrul 타입: lawService.do?ID=행정규칙일련번호 사용 (기존 방식)
         """
-        data = self._get("lawService.do", {"target": target, "ID": law_id})
         if target == "admrul":
+            data = self._get("lawService.do", {"target": target, "ID": law_id})
             return data.get("AdmRulService", {}) or {}
+        # law: MST=법령일련번호 로 조회 (ID= 파라미터는 현행 버전만 반환)
+        data = self._get("lawService.do", {"target": target, "MST": law_id})
         return data.get("법령", {}) or {}
 
     def get_admrul_text(self, law_id: str) -> dict:
