@@ -333,7 +333,7 @@ class App(tk.Tk):
                     v.announce_num,
                     str(v.enforce_date),
                     (f"있음 ⚠ ({r.transitional_type}형)" if r.transitional_type else "있음 ⚠") if r.transitional_flag else "없음",
-                    r.warning or ("확인 필요" if r.needs_user_review else ""),
+                    r.consistency_warning or r.warning or ("확인 필요" if r.needs_user_review else ""),
                 )
                 if r.transitional_flag:
                     tag = "warn"
@@ -509,3 +509,8 @@ class App(tk.Tk):
         )
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.INFO)
+
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
