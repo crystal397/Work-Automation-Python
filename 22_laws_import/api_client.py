@@ -103,23 +103,95 @@ class LawAPIClient:
             items = [items]
         return items or []
 
-    def get_law_history(self, mst: str, target: str = "law") -> list[dict]:
+    def get_law_history(self, mst: str = "", query: str = "", target: str = "law") -> list[dict]:
         """연혁 법령 전체 목록 조회 (공포번호·공포일·시행일 포함)
 
         Args:
-            mst:    법령 MST 번호 (법령 계열 식별자)
+            mst:    법령 MST 번호 — admrul 전용 (lawHistory.do 파라미터)
+            query:  법령명 검색어  — law 전용 (lsHistory 파라미터)
             target: "law" 또는 "admrul"
 
         Returns:
             연혁 법령 dict 목록 (시행일 오름차순 정렬되지 않을 수 있음)
+
+        Note:
+            law   타입: lawSearch.do?target=lsHistory 사용 (페이지네이션 포함)
+            admrul타입: lawHistory.do?MST=mst 사용 (기존 방식 유지)
         """
-        data = self._get("lawHistory.do", {"target": target, "MST": mst})
-        history_root = data.get("LawHistory", {}) or {}
-        history_section = history_root.get("연혁", {}) or {}
-        items = history_section.get("연혁법령", [])
-        if isinstance(items, dict):
-            items = [items]
-        return items or []
+        if target == "admrul":
+            data = self._get("lawHistory.do", {"target": target, "MST": mst})
+            history_root = data.get("LawHistory", {}) or {}
+            history_section = history_root.get("연혁", {}) or {}
+            items = history_section.get("연혁법령", [])
+            if isinstance(items, dict):
+                items = [items]
+            return items or []
+
+        # law 타입: lsHistory 엔드포인트 (HTML 파싱 + 페이지네이션)
+        # ※ lsHistory는 type=XML 미지원 — HTML 응답을 직접 파싱
+        import re
+        from bs4 import BeautifulSoup
+
+        def _norm_date(s: str) -> str:
+            """'2026.3.10' → '20260310'"""
+            parts = s.strip().split(".")
+            if len(parts) == 3:
+                return f"{parts[0]}{int(parts[1]):02d}{int(parts[2]):02d}"
+            return s.replace(".", "")
+
+        all_items: list[dict] = []
+        page = 1
+        while True:
+            try:
+                resp = self.session.get(
+                    f"{self.BASE}/lawSearch.do",
+                    params={
+                        "OC": self.oc, "type": "HTML", "target": "lsHistory",
+                        "query": query, "display": 100, "page": page,
+                    },
+                    timeout=config.API_TIMEOUT,
+                )
+                resp.raise_for_status()
+                resp.encoding = "utf-8"
+            except Exception as exc:
+                logger.warning("lsHistory HTML 요청 실패 (page=%d): %s", page, exc)
+                break
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            tables = soup.find_all("table")
+            if not tables:
+                break
+
+            # 링크에서 법령일련번호(MST) 추출
+            links = [a for a in soup.find_all("a", href=True) if "lsHistory" in a["href"]]
+            mst_list = []
+            for a in links:
+                m = re.search(r"MST=(\d+)", a["href"])
+                mst_list.append(m.group(1) if m else "")
+
+            rows = tables[0].find_all("tr")[1:]  # 헤더 제외
+            for i, row in enumerate(rows):
+                cells = [td.get_text(strip=True) for td in row.find_all("td")]
+                if len(cells) < 8:
+                    continue
+                lsi = mst_list[i] if i < len(mst_list) else ""
+                announce_num = re.sub(r"[^0-9\-]", "", cells[5])  # "제 21418호" → "21418"
+                item = {
+                    "법령명한글": cells[1],
+                    "공포번호": announce_num,
+                    "공포일자": _norm_date(cells[6]),
+                    "시행일자": _norm_date(cells[7]),
+                    "법령일련번호": lsi,
+                    "법령ID": lsi,   # 본문 조회(lawService.do?ID=) 에 동일 값 사용
+                    "현행연혁코드": "현행" if "현행" in cells[-1] else "연혁",
+                }
+                all_items.append(item)
+
+            if len(rows) < 100:
+                break
+            page += 1
+
+        return all_items
 
     def get_law_text(self, law_id: str, target: str = "law") -> dict:
         """법령 본문 조회 — 조문 + 부칙 포함
