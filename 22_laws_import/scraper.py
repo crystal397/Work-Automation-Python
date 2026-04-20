@@ -1,4 +1,4 @@
-"""행정규칙 연혁 웹 스크래퍼 — 법제처 API 미지원 시 fallback
+"""법령·행정규칙 연혁 웹 스크래퍼 — 법제처 API 미지원 시 fallback
 
 2단계 전략:
   1단계 — requests + BeautifulSoup (정적 HTML 파싱, 빠름)
@@ -7,18 +7,18 @@
            - time.sleep 고정 대기 → WebDriverWait + EC 동적 대기
            - Selenium 4.6+ : Selenium Manager가 chromedriver 자동 다운로드
 
-v2 개선 사항:
-  - URL 패턴 3개로 확장 (admRulBylInfoR / admRulLstv2R / admRulInfoR)
-  - BS4: EUC-KR 인코딩 fallback 추가
-  - Selenium: WebDriverWait + EC 동적 대기 (테이블 탐지 기반)
-  - 날짜 파싱: "2024년 1월 1일" 한국어 형식 추가
-  - 테이블 헤더 키워드 확장 (더 많은 변형 인식)
-  - 동일 시행일 중복 항목 자동 dedup
+공개 함수:
+  scrape_admrul_history(mst)  — 행정규칙 연혁 (admRulBylInfoR 등)
+  scrape_law_history(mst)     — 법령 연혁 (lsBylInfoR / lsInfoP)
 
-대상 URL:
+행정규칙 대상 URL:
   https://www.law.go.kr/admRulBylInfoR.do?admRulSeq={mst}
   https://www.law.go.kr/admRulLstv2R.do?admRulSeq={mst}
   https://www.law.go.kr/admRulInfoR.do?admRulSeq={mst}
+
+법령 대상 URL:
+  https://www.law.go.kr/lsBylInfoR.do?lsiSeq={mst}
+  https://www.law.go.kr/lsInfoP.do?lsiSeq={mst}
 """
 import logging
 import re
@@ -43,6 +43,11 @@ _HISTORY_URL_PATTERNS = [
     "https://www.law.go.kr/admRulBylInfoR.do?admRulSeq={mst}",  # 행정규칙 연혁정보
     "https://www.law.go.kr/admRulLstv2R.do?admRulSeq={mst}",    # 행정규칙 목록 v2
     "https://www.law.go.kr/admRulInfoR.do?admRulSeq={mst}",     # 행정규칙 상세정보
+]
+
+_LAW_HISTORY_URL_PATTERNS = [
+    "https://www.law.go.kr/lsBylInfoR.do?lsiSeq={mst}",   # 법령 연혁 목록
+    "https://www.law.go.kr/lsInfoP.do?lsiSeq={mst}",      # 법령 상세 (연혁 탭 포함)
 ]
 
 # Selenium: 테이블 요소 출현까지 최대 대기 시간 (초)
@@ -341,3 +346,181 @@ def _extract_id_from_row(row) -> Optional[str]:
         if m:
             return m.group(1)
     return None
+
+
+# ── 법령 연혁 스크래핑 ────────────────────────────────────────────────────────
+
+def scrape_law_history(mst: str, timeout: int = 15) -> list[dict]:
+    """법령 연혁 목록 스크래핑 (API lawHistory.do 미지원 시 fallback).
+
+    1단계(BS4) → 2단계(Selenium) 순으로 시도.
+
+    Returns:
+        [{"법령ID": str, "법령MST": str, "시행일자": str,
+          "공포번호": str, "법령명한글": str}, ...]
+        시행일자 기준 오름차순 정렬, 동일 시행일 중복 제거
+    """
+    results = _scrape_law_static(mst, timeout)
+    if results:
+        return _dedup(results)
+
+    results = _scrape_law_selenium(mst, timeout)
+    if results:
+        return _dedup(results)
+
+    logger.debug("[스크래퍼 법령] 모든 방법 실패 (mst=%s)", mst)
+    return []
+
+
+def _scrape_law_static(mst: str, timeout: int) -> list[dict]:
+    """requests + BeautifulSoup으로 법령 연혁 HTML 파싱."""
+    BeautifulSoup = _try_bs4()
+    if BeautifulSoup is None:
+        logger.debug("[스크래퍼 법령] beautifulsoup4 미설치 — 정적 파싱 스킵")
+        return []
+
+    session = requests.Session()
+    session.headers.update(_HEADERS)
+
+    for url_template in _LAW_HISTORY_URL_PATTERNS:
+        url = url_template.format(mst=mst)
+        try:
+            resp = session.get(url, timeout=timeout)
+            resp.raise_for_status()
+            time.sleep(0.3)
+
+            for encoding in ("utf-8", "euc-kr"):
+                try:
+                    resp.encoding = encoding
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    results = _parse_law_table(soup, mst)
+                    if results:
+                        logger.info(
+                            "[스크래퍼 법령 BS4] %d건 파싱 성공: %s (인코딩: %s)",
+                            len(results), url, encoding,
+                        )
+                        return results
+                except Exception as exc:
+                    logger.debug("[스크래퍼 법령 BS4] 파싱 오류 (%s, %s): %s", url, encoding, exc)
+
+        except requests.exceptions.RequestException as exc:
+            logger.debug("[스크래퍼 법령 BS4] 요청 실패 (%s): %s", url, exc)
+
+    return []
+
+
+def _scrape_law_selenium(mst: str, timeout: int) -> list[dict]:
+    """Selenium headless Chrome으로 법령 연혁 JS 렌더링 후 파싱."""
+    selenium_pkg = _try_selenium()
+    if selenium_pkg is None:
+        logger.debug("[스크래퍼 법령 Selenium] selenium 미설치 — 스킵")
+        return []
+
+    BeautifulSoup = _try_bs4()
+    if BeautifulSoup is None:
+        logger.debug("[스크래퍼 법령 Selenium] beautifulsoup4 미설치 — 스킵")
+        return []
+
+    webdriver, Options, By, WebDriverWait, EC, TimeoutException = selenium_pkg
+
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1280,900")
+    options.add_argument(f"user-agent={_HEADERS['User-Agent']}")
+    options.add_experimental_option("excludeSwitches", ["enable-logging"])
+
+    driver = None
+    try:
+        driver = webdriver.Chrome(options=options)
+        driver.set_page_load_timeout(timeout)
+
+        for url_template in _LAW_HISTORY_URL_PATTERNS:
+            url = url_template.format(mst=mst)
+            try:
+                driver.get(url)
+                try:
+                    WebDriverWait(driver, _SELENIUM_TABLE_TIMEOUT).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "table tr"))
+                    )
+                    time.sleep(_SELENIUM_RENDER_MARGIN)
+                except TimeoutException:
+                    logger.debug(
+                        "[스크래퍼 법령 Selenium] 테이블 미출현 (timeout=%ds): %s",
+                        _SELENIUM_TABLE_TIMEOUT, url,
+                    )
+                    continue
+
+                soup = BeautifulSoup(driver.page_source, "html.parser")
+                results = _parse_law_table(soup, mst)
+                if results:
+                    logger.info(
+                        "[스크래퍼 법령 Selenium] %d건 파싱 성공: %s", len(results), url
+                    )
+                    return results
+
+            except Exception as exc:
+                logger.debug("[스크래퍼 법령 Selenium] 페이지 오류 (%s): %s", url, exc)
+
+    except Exception as exc:
+        logger.debug("[스크래퍼 법령 Selenium] 드라이버 초기화 실패: %s", exc)
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+    return []
+
+
+def _parse_law_table(soup, mst: str) -> list[dict]:
+    """BeautifulSoup soup에서 법령 연혁 테이블 파싱.
+
+    반환 키는 _raw_to_version(target="law")가 기대하는 필드명과 일치한다.
+    """
+    results = []
+
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            continue
+
+        headers = [th.get_text(strip=True) for th in rows[0].find_all(["th", "td"])]
+
+        col_enforce = _find_col(headers, ["시행일", "시행일자", "효력발생일", "발효일"])
+        col_announce = _find_col(headers, [
+            "공포번호", "제정·개정번호", "제정개정번호", "번호",
+        ])
+        col_name = _find_col(headers, ["법령명", "법령명한글", "명칭"])
+
+        if col_enforce is None:
+            continue
+
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"])
+            if not cells:
+                continue
+
+            max_col = max(
+                c for c in [col_enforce, col_announce, col_name] if c is not None
+            )
+            if len(cells) <= max_col:
+                continue
+
+            enforce_raw = cells[col_enforce].get_text(strip=True)
+            enforce_date = _parse_date_str(enforce_raw)
+            if not enforce_date:
+                continue
+
+            results.append({
+                "법령ID":    _extract_id_from_row(row) or "",
+                "법령MST":   mst,
+                "시행일자":   enforce_date,
+                "공포번호":   cells[col_announce].get_text(strip=True) if col_announce is not None else "",
+                "법령명한글": cells[col_name].get_text(strip=True) if col_name is not None else "",
+            })
+
+    return results
