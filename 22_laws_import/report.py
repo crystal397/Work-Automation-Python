@@ -176,18 +176,24 @@ class WordReportGenerator:
 
             v = r.selected
 
-            # 기본 정보
+            # 기본 정보 — 인용 형식
             info = self.doc.add_paragraph()
-            for label, value in [
-                ("법령명", v.name),
-                ("공포번호", v.announce_num),
-                ("공포일", str(v.announce_date)),
-                ("시행일", str(v.enforce_date)),
-            ]:
-                run_l = info.add_run(f"{label}: ")
-                _set_font(run_l, bold=True)
-                run_v = info.add_run(f"{value}　")
-                _set_font(run_v)
+            citation = v.citation if (v.law_type or v.revision_type) else None
+            if citation:
+                run_c = info.add_run(citation)
+                _set_font(run_c, bold=True)
+            else:
+                # 법령 본문 미로드 시 간략 형식으로 fallback
+                for label, value in [
+                    ("법령명", v.name),
+                    ("공포번호", v.announce_num),
+                    ("공포일", str(v.announce_date)),
+                    ("시행일", str(v.enforce_date)),
+                ]:
+                    run_l = info.add_run(f"{label}: ")
+                    _set_font(run_l, bold=True)
+                    run_v = info.add_run(f"{value}　")
+                    _set_font(run_v)
 
             url_p = self.doc.add_paragraph()
             run_label = url_p.add_run("출처 URL: ")

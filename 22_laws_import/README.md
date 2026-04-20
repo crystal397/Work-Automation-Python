@@ -9,12 +9,12 @@
 | 기능 | 설명 |
 |---|---|
 | 입찰공고일 기준 버전 매칭 | 법령 연혁을 조회하여 입찰공고일에 시행 중인 버전 자동 선정 |
-| 6단계 시행일 판단 로직 | 연혁조회 → 1차 후보 → 부칙 경과규정 탐지(유형 A/B 구분) → 2차 후보 → 정합성 확인 → 사용자 검토 |
+| 5단계 시행일 판단 로직 | 연혁조회 → 1차 후보 → 부칙 경과규정 탐지(유형 A/B 구분) → 2차 후보 → 사용자 검토 |
 | 부칙 경과규정 탐지 | 유형 A(법령 전체 경과규정) · 유형 B(조문 단위 경과규정) 자동 구분 + 영향 조번호 표시 |
-| 상위·하위법 정합성 확인 | 법률·시행령·시행규칙 시행일 불일치 시 자동 경고 |
-| 행정규칙 연혁 조회 | 4단계 fallback — lawHistory.do → 웹 스크래핑(BS4/Selenium) → search_law 광범위 검색 → 현행 버전 + 수동 확인 경고 |
+| 행정규칙 연혁 조회 | 3단계 fallback — lawHistory.do → search_law → 웹 스크래핑(admRulHstListR.do) |
+| 법령 연혁 조회 실패 대응 | 연혁 API 실패 시 현행 버전 표시 + 수동 확인 안내 (`_current_version_fallback`) |
 | 조문 호(號) 단위 추출 | 항(①②③) 하위 호(1.2.3.) 단위까지 추출 및 Word 리포트 출력 |
-| 공기연장 관련 조문 필터 | 사전 정의된 키워드 26개로 관련 조문 자동 추출 (호 단위 포함) |
+| 공기연장 관련 조문 필터 | 사전 정의된 키워드 23개로 관련 조문 자동 추출 (호 단위 포함) |
 | 원문 직접 인용 | 법제처 API 응답 원문만 사용 — AI 재작성 없음 |
 | 출처 명시 | 법령명·공포번호·시행일·조문번호 5요소 기록 |
 | Word 리포트 저장 | 매칭 결과·조문 원문을 `.docx`로 출력 |
@@ -57,14 +57,13 @@
 ```
 22_laws_import/
 ├── main.py          ← 진입점 (로깅 초기화 → GUI 실행)
-├── gui.py           ← Tkinter GUI (좌측: 입력 패널 / 우측: 결과 탭 + Word 저장)
-├── engine.py        ← 핵심 매칭 엔진 (6단계 시행일 판단 로직)
-├── api_client.py    ← 법제처 국가법령정보 API 클라이언트 (경로 A)
-├── scraper.py       ← 행정규칙 연혁 웹 스크래퍼 (BS4 → Selenium 2단계 fallback)
-├── cache.py         ← SQLite 로컬 캐시 (TTL 7일)
+├── gui.py           ← CustomTkinter GUI (좌측: 입력 패널 / 우측: 결과 탭 + Word 저장)
+├── engine.py        ← 핵심 매칭 엔진 (5단계 시행일 판단 로직 + 연혁 실패 시 현행 버전 fallback)
+├── api_client.py    ← 법제처 국가법령정보 API 클라이언트
+├── scraper.py       ← 행정규칙 연혁 웹 스크래퍼 (requests + BeautifulSoup)
+├── cache.py         ← SQLite 로컬 캐시 (TTL 7일, WAL 모드)
 ├── report.py        ← Word(.docx) 리포트 생성기
-├── config.py        ← API 설정 / 대상 법령 목록 / 공기연장 키워드
-├── .env.example     ← 환경변수 템플릿
+├── config.py        ← API 설정 / 대상 법령 목록 / 공기연장 키워드 23개
 ├── requirements.txt
 └── requirements.md  ← 요구사항 정의서
 ```
@@ -84,8 +83,6 @@
 # 22_laws_import/.env
 LAW_API_OC=법제처_가입_이메일_ID
 ```
-
-`.env.example`을 `.env`로 복사 후 발급받은 기관코드를 입력합니다.
 
 ---
 
@@ -107,7 +104,7 @@ GUI가 열리면:
 
 ---
 
-## 6단계 시행일 판단 로직
+## 5단계 시행일 판단 로직
 
 ```
 1. 연혁 조회     → 대상 법령의 전체 버전(공포번호·시행일) 수집
@@ -116,8 +113,26 @@ GUI가 열리면:
                    유형 A (법령 전체): "이 법 시행 전에 공고된 입찰에 대해서는 종전의 규정에 따른다"
                    유형 B (조문 단위): "제○조의 개정규정은 시행 후 최초 공고 분부터 적용"
 4. 2차 후보      → 유형 A: 직전 버전 전환 / 유형 B: 해당 조문만 직전 버전 병기
-5. 정합성 확인   → 법률·시행령·시행규칙 시행일 불일치 시 경고
-6. 사용자 검토   → 자동 확정 불가 시 두 후보 모두 출력 + 확인 요청
+5. 사용자 검토   → 자동 확정 불가 시 두 후보 모두 출력 + 플래그
+```
+
+### 행정규칙(admrul) 연혁 3단계 fallback
+
+```
+① lawHistory.do admrul 호출
+   (행정규칙ID · 행정규칙일련번호 둘 다 시도)
+② search_law(display=100) 광범위 검색
+   → 5건 이상이면 즉시 반환 / 미만이면 ③ 병행
+③ requests + BeautifulSoup 웹 스크래핑
+   (admRulHstListR.do?admRulSeq=행정규칙일련번호)
+   → 이상 모두 실패 시: 현행 버전 + "연혁 조회 불가" 수동 확인 경고 출력
+```
+
+### 법령(law) 연혁 조회 실패 시
+
+```
+lawHistory.do 호출 → 빈 결과 → _current_version_fallback()
+  → lawSearch.do로 현행 버전 표시 + 수동 확인 경고
 ```
 
 ---
@@ -137,7 +152,7 @@ GUI가 열리면:
 ## 필요 라이브러리
 
 ```bash
-pip install requests xmltodict python-docx python-dotenv tkcalendar beautifulsoup4 selenium
+pip install requests xmltodict python-docx python-dotenv customtkinter tkcalendar beautifulsoup4
 ```
 
 ---
@@ -145,6 +160,6 @@ pip install requests xmltodict python-docx python-dotenv tkcalendar beautifulsou
 ## 주의사항
 
 - **법제처 API 기관코드**는 `.env`로 관리합니다. 소스코드에 직접 입력하지 마세요.
-- 행정규칙(회계예규·고시) 중 일부는 API에서 조회되지 않을 수 있습니다. 누락 시 결과에 표시됩니다.
+- 행정규칙(회계예규·고시) 중 일부는 API에서 연혁이 조회되지 않을 수 있습니다. 누락 시 결과에 표시됩니다.
 - 부칙 경과규정 자동 해석은 패턴 매칭 기반이므로 탐지된 경우 반드시 사용자가 직접 확인하세요.
 - API 호출 기록은 `logs/laws_import.log`에 저장됩니다.
