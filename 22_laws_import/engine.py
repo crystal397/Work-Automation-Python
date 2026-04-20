@@ -199,7 +199,9 @@ class LawMatcher:
             try:
                 raw_list = self.client.get_law_history(mst, query=query, target=target)
             except Exception as exc:
-                logger.warning("연혁 API 호출 실패 (mst=%s, query=%s, target=%s): %s", mst, query, target, exc)
+                # admrul은 lawHistory.do가 404를 반환하는 것이 정상 — DEBUG로 기록
+                log_fn = logger.debug if target == "admrul" else logger.warning
+                log_fn("연혁 API 호출 실패 (mst=%s, query=%s, target=%s): %s", mst, query, target, exc)
                 raw_list = []
             if raw_list:
                 self.cache.set(cache_key, raw_list)
