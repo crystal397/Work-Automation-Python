@@ -18,7 +18,7 @@ from typing import Callable, Optional
 
 from api_client import LawAPIClient
 from cache import LawCache
-from scraper import scrape_admrul_history, scrape_law_history
+from scraper import scrape_admrul_history
 import config
 
 logger = logging.getLogger(__name__)
@@ -546,22 +546,8 @@ class LawMatcher:
         except Exception as exc:
             logger.debug("[행정규칙 연혁] lawHistory.do 실패: %s", exc)
 
-        # 2단계: 웹 스크래핑 (beautifulsoup4 필요)
-        try:
-            raw_list = scrape_admrul_history(mst)
-            versions = [
-                v for raw in raw_list
-                if (v := _raw_to_version(raw, mst, "admrul"))
-            ]
-            versions.sort(key=lambda v: v.enforce_date)
-            if versions:
-                logger.info("[행정규칙 연혁] 스크래핑 성공: %d건", len(versions))
-                return versions, "scraper"
-        except Exception as exc:
-            logger.debug("[행정규칙 연혁] 스크래핑 실패: %s", exc)
-
-        # 3단계: search_law 광범위 검색으로 여러 버전 수집
-        # lawSearch.do는 현행+연혁 버전 모두 반환하며, 같은 행정규칙ID를 공유함
+        # 2단계: search_law — admrul은 lawSearch 결과에 현행+연혁 모두 포함됨
+        # (웹 스크래핑보다 빠르고 신뢰성 높으므로 우선 시도)
         try:
             raw_list = self.client.search_law(query, target="admrul", display=100)
             # 같은 행정규칙ID 계열만 선택 (다른 규칙이 같은 검색어에 걸리는 경우 배제)
@@ -577,12 +563,24 @@ class LawMatcher:
             ]
             versions.sort(key=lambda v: v.enforce_date)
             if versions:
-                logger.info(
-                    "[행정규칙 연혁] search_law fallback 성공: %d건", len(versions)
-                )
+                logger.info("[행정규칙 연혁] search_law 성공: %d건", len(versions))
                 return versions, "search"
         except Exception as exc:
-            logger.debug("[행정규칙 연혁] search_law fallback 실패: %s", exc)
+            logger.debug("[행정규칙 연혁] search_law 실패: %s", exc)
+
+        # 3단계: 웹 스크래핑 (beautifulsoup4 필요) — search 실패 시 최후 수단
+        try:
+            raw_list = scrape_admrul_history(mst)
+            versions = [
+                v for raw in raw_list
+                if (v := _raw_to_version(raw, mst, "admrul"))
+            ]
+            versions.sort(key=lambda v: v.enforce_date)
+            if versions:
+                logger.info("[행정규칙 연혁] 스크래핑 성공: %d건", len(versions))
+                return versions, "scraper"
+        except Exception as exc:
+            logger.debug("[행정규칙 연혁] 스크래핑 실패: %s", exc)
 
         return [], ""
 
@@ -733,24 +731,9 @@ class LawMatcher:
 
         all_versions = self._get_history(mst, target)
         if not all_versions:
-            # lawHistory.do 404 → 웹 스크래핑 fallback
-            try:
-                raw_list = scrape_law_history(mst)
-                scraped = [
-                    v for raw in raw_list
-                    if (v := _raw_to_version(raw, mst, target))
-                ]
-                scraped.sort(key=lambda v: v.enforce_date)
-                if scraped:
-                    all_versions = scraped
-                    logger.info("[법령 연혁] 웹 스크래핑 성공: %d건", len(all_versions))
-                else:
-                    logger.warning("[법령 연혁] 웹 스크래핑 결과 없음 (mst=%s)", mst)
-            except Exception as exc:
-                logger.warning("[법령 연혁] 웹 스크래핑 실패 (mst=%s): %s", mst, exc)
-
-        if not all_versions:
-            # 연혁 완전 실패 → lawSearch 현행 버전 fallback
+            # 법제처 DRF API는 law 타입의 연혁 버전을 제공하지 않음
+            # (lawHistory.do → 404, 웹 스크래핑도 JS 렌더링으로 불가)
+            # → 현행 버전 fallback으로 즉시 전환
             return self._current_version_fallback(display_name, query, target, bid_date, mst)
 
         logger.info("연혁 버전 %d개 확인", len(all_versions))
