@@ -54,6 +54,9 @@ class LawAPIClient:
             except requests.exceptions.Timeout:
                 logger.warning("타임아웃 (%d/%d): %s", attempt, config.API_RETRY, endpoint)
             except requests.exceptions.HTTPError as exc:
+                # 404는 엔드포인트 자체가 없는 것 — 재시도해도 소용없으므로 즉시 중단
+                if exc.response is not None and exc.response.status_code == 404:
+                    raise
                 logger.warning("HTTP 오류 (%d/%d): %s — %s", attempt, config.API_RETRY, endpoint, exc)
             except requests.exceptions.RequestException as exc:
                 logger.warning("요청 실패 (%d/%d): %s — %s", attempt, config.API_RETRY, endpoint, exc)

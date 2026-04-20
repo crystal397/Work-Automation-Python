@@ -348,7 +348,7 @@ class LawMatcher:
                         data = json.loads(json_match.group())
                     except json.JSONDecodeError:
                         pass
-            if data is None:
+            if not isinstance(data, dict):
                 return False, "", "", []
             found = bool(data.get("found", False))
             if found:
@@ -460,6 +460,76 @@ class LawMatcher:
         return articles
 
     # ── 6단계 매칭 로직 ────────────────────────────────────────────────────────
+
+    def _current_version_fallback(
+        self,
+        display_name: str,
+        query: str,
+        target: str,
+        bid_date: date,
+        mst: str,
+    ) -> MatchResult:
+        """연혁 조회 완전 실패 시 현행 버전을 참고용으로 표시.
+
+        법제처 DRF API는 법령(law) 타입의 연혁 버전을 제공하지 않음.
+        lawSearch.do로 확보한 현행 버전을 표시하되,
+        입찰공고일 기준 실제 시행 버전은 수동 확인을 안내한다.
+        """
+        laws = self.client.search_law(query, target=target, display=10)
+        raw_current = next(
+            (l for l in laws if str(l.get("법령일련번호") or "") == mst), None
+        ) or (laws[0] if laws else None)
+
+        if not raw_current:
+            return MatchResult(
+                display_name=display_name,
+                selected=None, prev_version=None,
+                transitional_flag=False, transitional_text="",
+                warning=f"법령 조회 실패: '{query}'",
+                needs_user_review=True,
+            )
+
+        version = _raw_to_version(raw_current, mst, target)
+        if not version:
+            return MatchResult(
+                display_name=display_name,
+                selected=None, prev_version=None,
+                transitional_flag=False, transitional_text="",
+                warning=f"법령 버전 파싱 실패: '{query}'",
+                needs_user_review=True,
+            )
+
+        # 현행 버전 시행일이 입찰공고일보다 미래인지 확인
+        is_future = version.enforce_date > bid_date
+        if is_future:
+            warn = (
+                f"⚠ 연혁 조회 불가 (법제처 API 미지원) — "
+                f"현행 버전 시행일({version.enforce_date})이 입찰공고일({bid_date})보다 "
+                f"이후입니다. 입찰공고일 기준 실제 시행 버전은 "
+                f"law.go.kr에서 직접 확인하세요."
+            )
+        else:
+            warn = (
+                f"※ 연혁 조회 불가 (법제처 API 미지원) — "
+                f"현행 버전(시행일 {version.enforce_date}) 기준 표시. "
+                f"입찰공고일({bid_date}) 이후 추가 개정이 있을 수 있으니 확인 권장."
+            )
+
+        logger.warning("[법령] '%s' — 연혁 불가, 현행 버전 표시 (시행일 %s)", display_name, version.enforce_date)
+
+        text = self._get_text(version)
+        relevant_articles = self._filter_articles(text)
+
+        return MatchResult(
+            display_name=display_name,
+            selected=version,
+            prev_version=None,
+            transitional_flag=False,
+            transitional_text="",
+            relevant_articles=relevant_articles,
+            needs_user_review=True,
+            warning=warn,
+        )
 
     def _admrul_history(self, mst: str, query: str) -> tuple[list[LawVersion], str]:
         """행정규칙 연혁 버전 목록 수집 — 4단계 fallback.
@@ -680,13 +750,8 @@ class LawMatcher:
                 logger.warning("[법령 연혁] 웹 스크래핑 실패 (mst=%s): %s", mst, exc)
 
         if not all_versions:
-            return MatchResult(
-                display_name=display_name,
-                selected=None, prev_version=None,
-                transitional_flag=False, transitional_text="",
-                warning=f"연혁 법령 없음: '{query}' — API 및 웹 스크래핑 모두 실패",
-                needs_user_review=True,
-            )
+            # 연혁 완전 실패 → lawSearch 현행 버전 fallback
+            return self._current_version_fallback(display_name, query, target, bid_date, mst)
 
         logger.info("연혁 버전 %d개 확인", len(all_versions))
 
