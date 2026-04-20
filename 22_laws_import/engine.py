@@ -1,12 +1,11 @@
-"""핵심 매칭 엔진 — 입찰공고일 기준 6단계 시행일 판단 로직
+"""핵심 매칭 엔진 — 입찰공고일 기준 5단계 시행일 판단 로직
 
-6단계:
+5단계:
   1. 연혁 조회     — 해당 법령 전체 버전(공포번호·시행일) 수집
   2. 1차 후보 선정 — 시행일 ≤ 입찰공고일 중 가장 최근 버전
   3. 부칙 경과규정 — 1차 후보 부칙 파싱, 경과규정 패턴 탐지 (유형 A/B 구분)
   4. 2차 후보 선정 — 경과규정 존재 시 직전 버전을 병렬 후보로 제시
-  5. 상위·하위법 정합성 — law/시행령/시행규칙 시행일 비교 경고
-  6. 사용자 검토   — 자동 확정 불가 시 두 후보 모두 출력 + 플래그
+  5. 사용자 검토   — 자동 확정 불가 시 두 후보 모두 출력 + 플래그
 """
 import json
 import logging
@@ -42,16 +41,7 @@ _TRANSITIONAL_B_PATTERNS: list[re.Pattern] = [
 # 유형 B 경과규정에서 영향받는 조번호 추출
 _ARTICLE_NUM_PATTERN = re.compile(r"제\s*(\d+)\s*조")
 
-# 상위·하위법 정합성 확인 그룹 (display_name 기준)
-# law 타입끼리만 비교 — admrul은 시행일이 달라도 정상이므로 별도 처리
-_LAW_FAMILY_GROUPS: list[list[str]] = [
-    ["국가계약법", "국가계약법 시행령", "국가계약법 시행규칙"],
-    ["지방계약법", "지방계약법 시행령", "지방계약법 시행규칙"],
-    ["하도급법", "하도급법 시행령"],
-    ["조달사업에 관한 법률", "조달사업에 관한 법률 시행령"],
-]
-
-# 행정규칙 ↔ 상위 법령 연결 (시행일 불일치 시 soft warning 용도)
+# 행정규칙 ↔ 상위 법령 연결 (행정규칙 갱신 여부 soft note 용도)
 _ADMRUL_PARENT_MAP: dict[str, str] = {
     "공사계약일반조건": "국가계약법",
     "예정가격 작성기준": "국가계약법",
@@ -73,10 +63,32 @@ class LawVersion:
     announce_date: date   # 공포일자
     enforce_date: date    # 시행일자
     text: dict = field(default_factory=dict, repr=False)  # 법령 본문 (lazy load)
+    law_type: str = ""    # 법종구분명 (법률/대통령령/기획재정부령/계약예규/고시 등)
+    revision_type: str = ""  # 제개정구분명 (일부개정/전부개정/제정/타법개정 등)
 
     @property
     def source_url(self) -> str:
         return f"https://www.law.go.kr/lsInfoP.do?lsiSeq={self.law_id}"
+
+    @property
+    def citation(self) -> str:
+        """「법령명」(시행 YYYY.M.D., 종류 제NNN호, YYYY.M.D., 개정구분) 형식 인용문"""
+        e = self.enforce_date
+        a = self.announce_date
+        enforce_str = f"{e.year}.{e.month}.{e.day}."
+        announce_str = f"{a.year}.{a.month}.{a.day}." if a.year > 1900 else ""
+
+        parts = [f"시행 {enforce_str}"]
+        if self.law_type and self.announce_num:
+            parts.append(f"{self.law_type} 제{self.announce_num}호")
+        elif self.announce_num:
+            parts.append(f"제{self.announce_num}호")
+        if announce_str:
+            parts.append(announce_str)
+        if self.revision_type:
+            parts.append(self.revision_type)
+
+        return f"「{self.name}」({', '.join(parts)})"
 
 
 @dataclass
@@ -142,6 +154,22 @@ def _raw_to_version(raw: dict, mst: str, target: str) -> Optional[LawVersion]:
     except Exception as exc:
         logger.debug("버전 파싱 스킵: %s — %s", raw, exc)
         return None
+
+
+def _extract_meta(version: LawVersion, text: dict) -> None:
+    """법령 본문 응답에서 법종구분·제개정구분 추출 → version 필드 갱신."""
+    try:
+        if version.target == "admrul":
+            info = text.get("행정규칙기본정보") or {}
+            version.law_type = str(info.get("행정규칙종류") or "")
+            version.revision_type = str(info.get("제개정구분명") or "")
+        else:
+            info = text.get("기본정보") or {}
+            lt = info.get("법종구분") or {}
+            version.law_type = str(lt.get("#text") or lt) if isinstance(lt, dict) else str(lt)
+            version.revision_type = str(info.get("제개정구분") or "")
+    except Exception:
+        pass
 
 
 # ── 메인 엔진 ─────────────────────────────────────────────────────────────────
@@ -223,6 +251,7 @@ class LawMatcher:
         cached = self.cache.get(cache_key)
         if cached:
             version.text = cached
+            _extract_meta(version, cached)
             return cached
 
         try:
@@ -230,6 +259,7 @@ class LawMatcher:
             if text:
                 version.text = text
                 self.cache.set(cache_key, text)
+                _extract_meta(version, text)
             return text
         except Exception as exc:
             logger.error("본문 조회 실패 (ID=%s): %s", version.law_id, exc)
@@ -540,29 +570,42 @@ class LawMatcher:
             warning=warn,
         )
 
-    def _admrul_history(self, mst: str, query: str) -> tuple[list[LawVersion], str]:
-        """행정규칙 연혁 버전 목록 수집 — 4단계 fallback.
+    def _admrul_history(
+        self, mst: str, query: str, lsi: str = ""
+    ) -> tuple[list[LawVersion], str]:
+        """행정규칙 연혁 버전 목록 수집 — 3단계 fallback.
+
+        Args:
+            mst: 행정규칙ID (계열 식별자, lawHistory.do MST= 파라미터)
+            query: 행정규칙명 검색어
+            lsi:  행정규칙일련번호 (버전별 순번, 웹 스크래핑 URL admRulSeq= 파라미터)
 
         Returns:
             (versions, source) — source: "api" | "scraper" | "search" | ""
         """
         # 1단계: lawHistory.do admrul 시도
-        try:
-            versions = self._get_history(mst, "admrul")
-            if versions:
-                logger.info("[행정규칙 연혁] lawHistory.do 성공: %d건", len(versions))
-                return versions, "api"
-        except Exception as exc:
-            logger.debug("[행정규칙 연혁] lawHistory.do 실패: %s", exc)
+        # 행정규칙ID(mst)와 행정규칙일련번호(lsi) 둘 다 시도 — API가 어느 쪽을 MST로 쓰는지 불분명
+        for hist_id in dict.fromkeys([mst, lsi]):  # 중복 제거, 순서 유지
+            if not hist_id:
+                continue
+            try:
+                versions = self._get_history(hist_id, "admrul")
+                if versions:
+                    logger.info(
+                        "[행정규칙 연혁] lawHistory.do 성공 (MST=%s): %d건", hist_id, len(versions)
+                    )
+                    return versions, "api"
+            except Exception as exc:
+                logger.debug("[행정규칙 연혁] lawHistory.do 실패 (MST=%s): %s", hist_id, exc)
 
         # 2단계: search_law — admrul은 lawSearch 결과에 현행+연혁 모두 포함됨
-        # (웹 스크래핑보다 빠르고 신뢰성 높으므로 우선 시도)
+        search_versions: list[LawVersion] = []
         try:
             raw_list = self.client.search_law(query, target="admrul", display=100)
             # 같은 행정규칙ID 계열만 선택 (다른 규칙이 같은 검색어에 걸리는 경우 배제)
             same_series = [r for r in raw_list if str(r.get("행정규칙ID") or "") == mst]
             target_list = same_series if same_series else raw_list
-            versions = [
+            search_versions = [
                 v for raw in target_list
                 if (v := _raw_to_version(
                     raw,
@@ -570,26 +613,41 @@ class LawMatcher:
                     "admrul",
                 ))
             ]
-            versions.sort(key=lambda v: v.enforce_date)
-            if versions:
-                logger.info("[행정규칙 연혁] search_law 성공: %d건", len(versions))
-                return versions, "search"
+            search_versions.sort(key=lambda v: v.enforce_date)
+            if search_versions:
+                logger.info("[행정규칙 연혁] search_law 성공: %d건", len(search_versions))
+                # 충분한 연혁(5건 이상)이 있으면 즉시 반환
+                if len(search_versions) >= 5:
+                    return search_versions, "search"
+                # 적은 경우(최신 1~2건만 반환하는 API 한계) → 스크래핑 병행
+                logger.debug("[행정규칙 연혁] search_law %d건 → 스크래핑 추가 시도", len(search_versions))
         except Exception as exc:
             logger.debug("[행정규칙 연혁] search_law 실패: %s", exc)
 
-        # 3단계: 웹 스크래핑 (beautifulsoup4 필요) — search 실패 시 최후 수단
+        # 3단계: 웹 스크래핑 — 행정규칙일련번호(lsi)를 admRulSeq= URL 파라미터로 사용
+        # search_law 결과가 적을 때(API 한계로 최신 버전만 반환) 보완 목적으로 실행
+        scrape_id = lsi or mst
         try:
-            raw_list = scrape_admrul_history(mst)
-            versions = [
+            raw_list = scrape_admrul_history(scrape_id)
+            scraped = [
                 v for raw in raw_list
                 if (v := _raw_to_version(raw, mst, "admrul"))
             ]
-            versions.sort(key=lambda v: v.enforce_date)
-            if versions:
-                logger.info("[행정규칙 연혁] 스크래핑 성공: %d건", len(versions))
-                return versions, "scraper"
+            if scraped:
+                # search + scraper 병합 (시행일 기준 중복 제거)
+                seen = {v.enforce_date for v in search_versions}
+                merged = search_versions + [v for v in scraped if v.enforce_date not in seen]
+                merged.sort(key=lambda v: v.enforce_date)
+                logger.info(
+                    "[행정규칙 연혁] 스크래핑 보완 (id=%s): %d건 → 병합 %d건",
+                    scrape_id, len(scraped), len(merged),
+                )
+                return merged, "scraper"
         except Exception as exc:
-            logger.debug("[행정규칙 연혁] 스크래핑 실패: %s", exc)
+            logger.debug("[행정규칙 연혁] 스크래핑 실패 (id=%s): %s", scrape_id, exc)
+
+        if search_versions:
+            return search_versions, "search"
 
         return [], ""
 
@@ -625,9 +683,11 @@ class LawMatcher:
         )
         # 행정규칙 MST 역할: 행정규칙ID (버전 불문 동일 계열 식별자)
         mst = str(raw_current.get("행정규칙ID") or raw_current.get("법령MST") or raw_current.get("MST") or "")
+        # 행정규칙일련번호: 버전별 고유 순번 — 웹 스크래핑 URL(admRulSeq=)에 사용
+        lsi = str(raw_current.get("행정규칙일련번호") or raw_current.get("법령일련번호") or "")
 
         # 연혁 수집 시도 (B1 수정: source 명시 추적)
-        all_versions, history_source = self._admrul_history(mst, query)
+        all_versions, history_source = self._admrul_history(mst, query, lsi=lsi)
 
         if all_versions:
             # 입찰공고일 이전 시행 버전 필터
@@ -800,33 +860,14 @@ class LawMatcher:
         )
 
     def _check_family_consistency(self, results: list[MatchResult]) -> None:
-        """5단계: 상위·하위법 시행일 정합성 확인.
+        """5단계: 행정규칙 ↔ 상위 법령 갱신 여부 soft check.
 
-        [law 계열] 법률/시행령/시행규칙 간 시행일 불일치 → 경고 + 사용자 확인 요청
-        [admrul 연결] 행정규칙 시행일이 상위 법령보다 오래된 경우 → soft warning
-        results 목록을 in-place 수정한다.
+        법률/시행령/시행규칙은 별개 문서로 시행일이 각각 다르므로 비교하지 않는다.
+        행정규칙 시행일이 상위 법령보다 2년 이상 오래된 경우에만 참고 메시지를 남긴다.
         """
         result_by_name = {r.display_name: r for r in results}
 
-        # ── law 계열 정합성 ──────────────────────────────────────────────────────
-        for family in _LAW_FAMILY_GROUPS:
-            members = [result_by_name[name] for name in family if name in result_by_name]
-            dated = [(m, m.selected.enforce_date) for m in members if m.selected]
-            if len(dated) < 2:
-                continue
-
-            dates = {d for _, d in dated}
-            if len(dates) == 1:
-                continue  # 모두 동일 — 정상
-
-            date_summary = ", ".join(f"{m.display_name}={d}" for m, d in dated)
-            warn_msg = f"⚠ 상위·하위법 시행일 불일치 — {date_summary}"
-            logger.warning("정합성 경고: %s", warn_msg)
-            for m, _ in dated:
-                m.consistency_warning = warn_msg
-                m.needs_user_review = True
-
-        # ── admrul ↔ 상위 법령 soft warning ────────────────────────────────────
+        # ── admrul ↔ 상위 법령 soft note ────────────────────────────────────────
         for admrul_name, parent_name in _ADMRUL_PARENT_MAP.items():
             admrul_r = result_by_name.get(admrul_name)
             parent_r = result_by_name.get(parent_name)
@@ -838,15 +879,15 @@ class LawMatcher:
             admrul_date = admrul_r.selected.enforce_date
             parent_date = parent_r.selected.enforce_date
 
-            # 행정규칙 시행일이 상위 법령보다 1년 이상 오래된 경우 경고
+            # 행정규칙 시행일이 상위 법령보다 2년 이상 오래된 경우 참고 메시지
             days_diff = (parent_date - admrul_date).days
-            if days_diff > 365:
+            if days_diff > 730:
                 warn_msg = (
                     f"※ {admrul_name} 시행일({admrul_date})이 "
                     f"상위 법령 {parent_name} 시행일({parent_date})보다 "
                     f"{days_diff // 365}년 이상 앞섬 — 행정규칙 갱신 여부 확인 권장"
                 )
-                logger.warning("admrul soft warning: %s", warn_msg)
+                logger.info("admrul 갱신 확인 권장: %s", warn_msg)
                 if not admrul_r.consistency_warning:
                     admrul_r.consistency_warning = warn_msg
 
@@ -875,7 +916,7 @@ class LawMatcher:
             result = self.match_one(display_name, query, target, bid_date)
             results.append(result)
 
-        # 5단계 — 상위·하위법 정합성 확인 (전체 결과 수집 후 일괄 처리)
+        # 행정규칙 갱신 여부 soft check (전체 결과 수집 후 일괄 처리)
         self._check_family_consistency(results)
 
         if progress_callback:

@@ -4,12 +4,12 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v0.4 |
+| 문서 버전 | v0.6 |
 | 작성일 | 2026-04-16 |
-| 최종 수정 | 2026-04-18 |
+| 최종 수정 | 2026-04-20 |
 | 프로젝트명 | 법령 시점 매칭 시스템 |
 | 대상 업무 | 공기연장 보고서 작성 |
-| 상태 | 개발 진행 중 (API 승인 대기) |
+| 상태 | 개발 진행 중 (API 정상 사용 중) |
 
 ---
 
@@ -34,7 +34,7 @@
 |---|---|
 | 매칭 기준 | 시행일 기준 (부칙상 실제 시행되는 날짜) |
 | 프로그램 형태 | Python 스크립트 + Windows exe 실행파일 |
-| 데이터 소스 | **경로 A — 법제처 국가법령정보 공동활용** (2026-04-17 가입 신청 완료, 승인 대기 중) |
+| 데이터 소스 | **경로 A — 법제처 국가법령정보 공동활용** (2026-04-17 가입 신청 완료, API 정상 사용 중) |
 | 활용 목적 | 공기연장 보고서의 법령 근거 조문 확보 |
 | UI 방식 | Tkinter GUI (콘솔 프롬프트 미사용) |
 | 법령 조회 범위 | 실행 시 사용자가 선택 (전체 선택/해제 포함) |
@@ -51,7 +51,7 @@
 |---|---|
 | 제공기관 | 법제처 (직접 운영) |
 | 포털 URL | https://open.law.go.kr |
-| API 요청 URL | `http://www.law.go.kr/DRF/lawSearch.do` (목록)<br>`http://www.law.go.kr/DRF/lawService.do` (본문) |
+| API 요청 URL | `http://www.law.go.kr/DRF/lawSearch.do` (목록)<br>`http://www.law.go.kr/DRF/lawService.do` (본문)<br>`http://www.law.go.kr/DRF/lawHistory.do` (연혁) |
 | 인증 방식 | OC (기관코드) = 가입 시 이메일 ID |
 | 승인 절차 | 신청 → 담당자 검토 → 1~2일 이내 승인 |
 | 트래픽 제한 | 명시적 제한 문구는 없으나 과다 호출 시 제한 가능 |
@@ -84,7 +84,7 @@
 | **사내 배포 시 공공데이터포털 활용실적 등록** | 경로 B |
 
 > **✅ 결정 완료 (2026-04-17)**: **경로 A (국가법령정보 공동활용)** 선택.
-> 가입 신청 완료, 승인 대기 중 (1~2일 소요 예정).
+> 가입 신청 완료, API 정상 사용 중.
 > 경로 B 전환 옵션은 더 이상 검토하지 않는다.
 
 ---
@@ -100,10 +100,10 @@
 | F-03 | 시행일 기준 버전 선택 | 입찰공고일 ≥ 시행일 조건을 만족하는 버전 중 가장 최근의 것을 선택 |
 | F-04 | 부칙 경과규정 검토 | 선택된 법령 버전의 부칙을 파싱하여 두 유형 탐지. ① 법령 전체 경과규정 → 이전 버전 전환 경고. ② 조문 단위 경과규정 → 해당 조문에만 이전 버전 병기, 사용자 확인 요청. 탐지 실패 또는 해석 모호 시 P4 원칙에 따라 두 후보 버전 모두 출력 |
 | F-05 | 조문 원문 추출 | 선택된 법령 버전의 본문을 API로 조회하여 조·항·호·목(目) 단위로 원문 추출 |
-| F-06 | 공기연장 관련 조문 필터 | 공기연장 관련 조문(계약기간의 연장, 지체상금, 간접비, 설계변경 등)을 사전 정의된 키워드로 자동 필터링 |
-| F-07 | 결과 리포트 생성 | 매칭된 법령 목록, 적용 버전, 시행일, 관련 조문을 Word(.docx) 형식으로 출력. Excel·텍스트 형식은 미구현 (→ ISSUES.md #1) |
+| F-06 | 공기연장 관련 조문 필터 | 공기연장 관련 조문(계약기간의 연장, 지체상금, 간접비, 설계변경 등)을 사전 정의된 키워드 22개로 자동 필터링 |
+| F-07 | 결과 리포트 생성 | 매칭된 법령 목록, 적용 버전, 시행일, 관련 조문을 Word(.docx) 형식으로 출력. Excel·텍스트 형식 미구현 |
 | F-08 | 출처 명시 | 모든 조문에 [법령명, 공포번호, 시행일, 국가법령정보센터 URL] 표시 |
-| F-09 | 로컬 캐시 | API 호출 결과를 SQLite 등 로컬 DB에 저장, 반복 조회 속도 향상 및 오프라인 재사용 |
+| F-09 | 로컬 캐시 | API 호출 결과를 SQLite 로컬 DB에 저장, 반복 조회 속도 향상 및 오프라인 재사용 |
 
 ### 3.2 부가 기능 (Nice to Have)
 
@@ -144,10 +144,11 @@
 | 5 | 건설업 산업안전보건관리비 계상 및 사용기준 (고용노동부고시) | 고용노동부 |
 
 > **ℹ️ API target 구분 및 제약사항 (2026-04-17 확인)**
-> - `law` : 법령(법률, 시행령, 시행규칙) — 연혁 조회(lawHistory.do) 지원
+> - `law` : 법령(법률, 시행령, 시행규칙) — 연혁 조회(lawHistory.do) 지원. 연혁 조회 실패 시 현행 버전 표시 + 수동 확인 경고 (`_current_version_fallback`)
 > - `admrul` : 행정규칙(고시, 훈령, 예규) — **연혁 조회 API 미지원 (확인 완료)**
 >   → 4단계 fallback 전략으로 연혁 확보 시도:
->   　① `lawHistory.do` admrul 호출 시도 → ② `law.go.kr` 웹 스크래핑(`scraper.py`) → ③ `search_law(display=100)` 광범위 검색 → ④ 연혁 확보 실패 시 현행 버전 + 수동 확인 경고 출력
+>   　① `lawHistory.do` admrul 호출 시도 → ② `law.go.kr` 웹 스크래핑(`scraper.py`, BS4) → ③ Selenium headless Chrome 스크래핑 → ④ `search_law(display=100)` 광범위 검색
+>   → 이상 모두 실패 시 현행 버전 + 수동 확인 경고 출력
 >   → 연혁 일부라도 확보되면 입찰공고일 기준 버전 자동 선정. 확보 실패 시에만 수동 확인 안내.
 
 ---
@@ -201,7 +202,7 @@
 | 항목 | 내용 |
 |---|---|
 | 언어 | Python 3.10 이상 |
-| 주요 라이브러리 | `requests` (API 호출), `xmltodict` (XML 파싱), `sqlite3` (캐시), `python-docx` (Word 리포트), `python-dotenv` (`.env` 로드), `customtkinter` (모던 GUI 프레임워크), `tkcalendar` (날짜 선택 달력, 옵셔널), `beautifulsoup4` (admrul 연혁 웹 스크래핑, 옵셔널), `selenium>=4.6.0` (JS 렌더링 페이지 스크래핑, 옵셔널 — Selenium Manager가 chromedriver 자동 관리), `pyinstaller` (exe 빌드) |
+| 주요 라이브러리 | `requests` (API 호출), `xmltodict` (XML 파싱), `sqlite3` (캐시, 표준 라이브러리), `python-docx` (Word 리포트), `python-dotenv` (`.env` 로드), `customtkinter>=5.2.0` (모던 GUI 프레임워크), `tkinter` (표준 라이브러리 — filedialog·messagebox·ttk 사용), `tkcalendar` (날짜 선택 달력), `beautifulsoup4` (admrul 연혁 웹 스크래핑), `selenium>=4.6.0` (JS 렌더링 페이지 스크래핑 — Selenium Manager가 chromedriver 자동 관리), `pyinstaller` (exe 빌드) |
 | 패키징 | PyInstaller로 Windows용 단일 exe 빌드 (`--onefile` 옵션) |
 | 외부 API | 법제처 국가법령정보 (§2에서 경로 확정) |
 | 대상 OS | Windows 10 / 11 (우선), macOS는 Python 스크립트로 실행 |
@@ -210,18 +211,19 @@
 
 | 계층 | 역할 |
 |---|---|
-| ① GUI Layer | Tkinter 기반 GUI — 입찰공고일 입력, 체크박스 법령 선택, 결과 탭 표시, 경과규정 경고 색상 강조 |
+| ① GUI Layer | CustomTkinter 기반 모던 GUI — 입찰공고일 입력, 체크박스 법령 선택, 결과 탭 표시, 경과규정 경고 색상 강조 |
 | ② Engine Layer | 시행일 기준 버전 선정, 부칙 경과규정 탐지, 조문 필터링 등 핵심 비즈니스 로직 |
 | ③ API Client Layer | 법제처 OPEN API 호출, XML 파싱, 에러 처리, 재시도 로직 |
-| ④ Cache Layer | SQLite 기반 로컬 캐시 (법령 메타데이터, 연혁, 조문 본문) |
-| ⑤ Report Layer | Word, Excel, 텍스트 형식의 결과 리포트 생성 |
+| ④ Cache Layer | SQLite 기반 로컬 캐시 (법령 메타데이터, 연혁, 조문 본문), WAL 모드 |
+| ⑤ Report Layer | Word(.docx) 형식의 결과 리포트 생성 |
+| ⑥ Scraper Layer | 행정규칙(admrul) 연혁 웹 스크래핑 — requests/BS4 1단계, Selenium headless 2단계 (법령 law 타입은 API 실패 시 현행 버전 fallback) |
 
 ### 6.3 비기능 요구사항
 
 - **성능** — 1개 법령 조회 시 API 응답 포함 5초 이내, 캐시 활용 시 1초 이내
 - **신뢰성** — API 장애 시 로컬 캐시로 폴백, 네트워크 오류 시 최대 3회 재시도
 - **로깅** — 모든 API 호출, 버전 선정 과정, 사용자 선택을 로그 파일에 기록 (감사 추적 목적)
-- **보안** — API 키(OC 또는 서비스키)는 환경변수 또는 별도 설정 파일로 관리, 소스코드 하드코딩 금지
+- **보안** — API 키(OC)는 환경변수(`.env`) 또는 GUI 입력으로 관리, 소스코드 하드코딩 금지
 
 ---
 
@@ -231,33 +233,45 @@
 
 | No | 항목 | 상태 | 상세 |
 |---|---|---|---|
-| R1 | API 경로 및 승인 | ⏳ 승인 대기 | 경로 A 선택, 2026-04-17 가입 신청 완료. 승인 후 OC를 `.env`에 입력하면 즉시 사용 가능 |
-| R2 | 부칙 경과규정 자동 해석의 한계 | ✅ 안전장치 구현 완료 | 8개 정규표현식 패턴으로 탐지, 탐지 시 직전 버전 병렬 제시 + 사용자 확인 플래그. 12개 샘플 테스트 전체 통과 |
-| R3 | 행정규칙 API 연혁 미지원 | ✅ 대응 완료 | `admrul` 연혁 조회 불가 확인(2026-04-17). 4단계 fallback(lawHistory.do → 웹 스크래핑 → search_law → 현행 버전) 구현 완료. 연혁 확보 실패 시에만 수동 확인 경고 출력 |
-| R4 | API 트래픽 제한 | ✅ 완화 구현 | 경로 A는 명시적 제한 없음. SQLite 캐시(TTL 7일) 구현 완료로 반복 호출 최소화 |
-| R5 | 공기연장 관련 조문 식별 기준 | ✅ 확정 | 실제 보고서 10개 분석 기반으로 키워드 24개 확정 (이행기간·준공·착공·실비산정·간접공사비 등 추가) |
+| R1 | API 경로 및 승인 | ✅ 완료 | 경로 A 선택, 2026-04-17 가입 신청 완료. API 정상 사용 중 (2026-04-20 확인) |
+| R2 | 부칙 경과규정 자동 해석의 한계 | ✅ 안전장치 구현 완료 | 정규표현식 패턴으로 탐지(유형 A: 5개 패턴, 유형 B: 2개 패턴), 탐지 시 직전 버전 병렬 제시 + 사용자 확인 플래그. 비정형 패턴은 Claude CLI subprocess fallback |
+| R3 | 행정규칙 API 연혁 미지원 | ✅ 대응 완료 | `admrul` 연혁 조회 불가 확인(2026-04-17). 4단계 fallback(lawHistory.do → BS4 스크래핑 → Selenium 스크래핑 → search_law) 구현 완료. 연혁 확보 실패 시에만 수동 확인 경고 출력 |
+| R4 | API 트래픽 제한 | ✅ 완화 구현 | 경로 A는 명시적 제한 없음. SQLite 캐시(TTL 7일, WAL 모드) 구현 완료로 반복 호출 최소화 |
+| R5 | 공기연장 관련 조문 식별 기준 | ✅ 확정 | 실제 보고서 10개 분석 기반으로 키워드 22개 확정 (이행기간·준공·착공·실비산정·간접공사비 등) |
 
 ### 7.2 결정 질문 현황
 
 | Q | 항목 | 상태 | 결정 내용 |
 |---|---|---|---|
 | Q1 | API 경로 선택 | ✅ 확정 | 경로 A (국가법령정보 공동활용) |
-| Q2 | API 가입 담당 | ✅ 완료 | 2026-04-17 가입 신청 완료 |
+| Q2 | API 가입 담당 | ✅ 완료 | 2026-04-17 가입 신청 완료, API 정상 사용 중 |
 | Q3 | 키워드 사전 구축 방식 | ✅ 완료 | 실제 보고서 10개(reference 폴더) 분석으로 추출 |
 | Q4 | 부칙 확인 UI 방식 | ✅ 확정 | Tkinter GUI — 결과 탭에서 색상 강조 + Word 리포트에 경고 출력 |
 | Q5 | 리포트 형식 | ✅ 확정 | Word(.docx) 중심. reference 폴더에 양식 예시 10개 확보 |
 | Q6 | 캐시 자동 업데이트 스케줄러 | ❌ 미포함 | 현재 범위 외. 추후 필요 시 별도 검토 |
 | Q7 | 법령 조회 범위 | ✅ 확정 | GUI에서 체크박스로 선택 (전체 선택/해제 버튼 포함) |
 
-### 7.3 API 승인 후 즉시 해야 할 작업
-
-1. `.env` 파일에 `LAW_API_OC=승인된_이메일` 입력
-2. `lawHistory.do` 실제 응답 XML 구조 확인 (현재 코드의 파싱 태그명 검증)
-3. 법령(law) 연혁 매칭 전체 실행 테스트
-4. 행정규칙(admrul) 현행 버전 조회 실제 동작 확인
-
 ---
 
+> **📌 v0.6 변경 이력 (2026-04-20)**
+> - [버그수정] `engine.py` — `_get_history()`에서 `client.get_law_history()`에 존재하지 않는 `query=` 파라미터를 전달하여 `TypeError` 발생, law 연혁이 항상 빈 목록으로 처리되던 문제 수정 (`query=query` 제거)
+> - `engine.py` — `_get_history()`: law 타입 응답에서 법령명 필터링 로직 유지 (raw_list 후처리로 처리)
+> - `engine.py` — `_current_version_fallback()` 신규 메서드: 법령 연혁 조회 완전 실패 시 현행 버전 + 수동 확인 경고 표시
+> - `scraper.py` — `scrape_law_history()` 신규 공개 함수: 법령 연혁 웹 스크래핑 (lsBylInfoR / lsInfoP)
+> - `scraper.py` — Selenium `time.sleep(3)` 고정 대기 → `WebDriverWait + EC.presence_of_element_located` 동적 대기로 교체 (최대 10초, 렌더링 여유 0.5초만 고정)
+> - `scraper.py` — UTF-8/EUC-KR 인코딩 전환 시 HTTP 요청 중복 발생 완전 제거 (요청 1회 후 인코딩만 변경)
+> - `scraper.py` — 행정규칙 대상 URL 2개 → 3개 확장 (`admRulInfoR.do` 추가), 한국어 날짜 형식(YYYY년 MM월 DD일) 파싱 지원
+> - `gui.py` — 부칙 경과규정 유형(A/B) 결과 탭 및 팝업에 표시
+> - `gui.py` — `consistency_warning` 색상 태그 적용 누락 수정
+> - `report.py` — `admrul_no_history` 조건 수정: 행정규칙 전체가 아닌 "연혁 조회 불가" 경고 항목만 주황색 표시
+> - §4 행정규칙 주석: fallback 4단계 상세화 (BS4→Selenium→search_law 순서 명시)
+> - §6.1: `customtkinter>=5.2.0` 명시 (requirements.txt 누락 수정), `tkinter` 표준 라이브러리와 역할 구분
+> - §6.2: Scraper Layer 추가, GUI Layer를 CustomTkinter로 정정
+> - §6.2 Scraper Layer: `scrape_law_history()` 미통합 상태 명시 (law 타입은 현행 버전 fallback)
+> - §7.1 R1: API 정상 사용 중으로 상태 업데이트
+> - §7.1 R5: 키워드 24개 → 22개 (실제 코드 기준 정정)
+> - §7.2 Q2: API 정상 사용 중으로 상태 업데이트
+>
 > **📌 v0.5 변경 이력 (2026-04-18)**
 > - §6.1: `selenium>=4.6.0` 추가 (scraper.py 2단계 Selenium headless 반영, Selenium Manager 자동 chromedriver 관리)
 > - §6.1: 문서 헤더 버전 v0.3 → v0.4 오기 수정
