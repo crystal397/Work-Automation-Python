@@ -1,11 +1,19 @@
 """설정 파일 — API 키, 대상 법령 목록, 키워드 사전"""
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+# exe(PyInstaller --onefile) 실행 시 __file__은 임시 압축해제 폴더를 가리키므로
+# 캐시·로그·.env 는 exe 파일 옆에 저장되도록 BASE_DIR을 별도로 결정한다.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent
+
 # .env 파일 로드 (없어도 오류 없음)
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(BASE_DIR / ".env")
 
 # ─── API 설정 ────────────────────────────────────────────────────────────────
 # open.law.go.kr 가입 후 발급된 이메일 ID (기관코드)
@@ -16,12 +24,12 @@ API_RETRY = 3         # 최대 재시도 횟수
 API_RETRY_DELAY = 2   # 재시도 간격(초)
 
 # ─── 캐시 설정 ───────────────────────────────────────────────────────────────
-CACHE_DIR = Path(__file__).parent / "cache"
+CACHE_DIR = BASE_DIR / "cache"
 CACHE_DB_PATH = CACHE_DIR / "laws.db"
 CACHE_TTL_DAYS = 7   # 캐시 유효 기간 (일)
 
 # ─── 로그 파일 ───────────────────────────────────────────────────────────────
-LOG_DIR = Path(__file__).parent / "logs"
+LOG_DIR = BASE_DIR / "logs"
 LOG_FILE = LOG_DIR / "laws_import.log"
 
 # ─── 대상 법령 목록 ───────────────────────────────────────────────────────────
