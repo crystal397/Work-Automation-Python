@@ -203,12 +203,12 @@ class App(tk.Tk):
         hsb.pack(side="bottom", fill="x")
         self.tree.pack(fill="both", expand=True)
 
-        widths = [180, 110, 90, 100, 200]
+        widths = [200, 110, 90, 100, 600]
         for col, w in zip(cols, widths):
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=w, minwidth=60, anchor="center")
-        self.tree.column("법령명", anchor="w")
-        self.tree.column("비고", anchor="w")
+            self.tree.column(col, width=w, minwidth=60, anchor="center", stretch=False)
+        self.tree.column("법령명", anchor="w", stretch=True)   # 법령명만 창 크기에 맞게 늘어남
+        self.tree.column("비고", anchor="w", stretch=False)    # 비고는 고정폭 → 수평 스크롤 가능
 
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
