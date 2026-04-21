@@ -180,11 +180,19 @@ python work/
 │   ├── requirements.txt
 │   └── requirements.md      ← 요구사항 정의서
 │
-└── 23_excel_margins/
-    ├── adjust_excel_margins.py   ← 여백 조정 + GUI 진입점
-    ├── build.bat                 ← PyInstaller EXE 빌드
-    └── dist/
-        └── 엑셀_여백_조정.exe    ← 배포용 단일 EXE
+├── 23_excel_margins/
+│   ├── adjust_excel_margins.py   ← 여백 조정 + GUI 진입점
+│   ├── build.bat                 ← PyInstaller EXE 빌드
+│   └── dist/
+│       └── 엑셀_여백_조정.exe    ← 배포용 단일 EXE
+│
+└── 24_crash_construction/
+    ├── README.md
+    ├── mandays_report_automation_v6.py   ← 가변 섹션·요일 색상
+    ├── mandays_report_automation_v7.py   ← 페이지 분할·AB/AC 단가
+    ├── mandays_report_automation_v8.py   ← 최신: 공휴일 자동·연도별 분할
+    ├── sample_260415_케이씨산업 돌관공사비 산출근거.xlsx
+    └── source/                           ← 소스 파일 (연/월 파일명)
 ```
 
 ---
@@ -564,6 +572,27 @@ python main.py rescan-all
 
 ---
 
+### 24. 돌관공사비 노무비 출력일보 자동 작성
+
+소스 Excel 파일(업체별 공수 내역)을 읽어 돌관공사비 산출근거의 **노무비 출력일보** 시트를 자동 생성.
+
+- 카테고리 4종 분류: 본선 / 복합 / 삼성 / 기타 (소스 F·H열 키워드 기반)
+- 페이지 분할: 한 페이지 최대 21명, 초과 시 헤더 재출력하며 자동 분할
+- 합계행 E열에 실제 근로자 수 `N명` 기입, 수식 범위는 전체 페이지 통합
+- 날짜 헤더 색상: 토=파란 글씨 / 일·공휴일=빨간 글씨 + `휴` 표시
+- `holidays` 라이브러리로 대체·선거·임시공휴일까지 자동 처리
+- 통합 파일 1개 + 연도별 분할 파일 (`_YYYY.xlsx`) 동시 저장
+- External link + definedNames 제거로 Excel 열기 속도 및 복구 경고 방지
+
+```bash
+pip install openpyxl holidays
+python mandays_report_automation_v8.py
+```
+
+**의존성**: openpyxl, holidays
+
+---
+
 ### 23. 엑셀 인쇄 여백 일괄 조정
 
 폴더 내 모든 엑셀 파일의 시트 여백을 일괄 검사·수정하는 도구.
@@ -633,6 +662,7 @@ python land_price_lookup.py # 공시지가 조회
 | 10 기상 | 727개 관측소 자동 탐색 + 공종별 작업불가일 산정 | Haversine, APScheduler |
 | 18 보고서 | PDF·HWP·Excel 등 멀티포맷 → Word 보고서 | 폴백 체인, Claude Code 연동 |
 | 20 귀책분석 | 공문 3-Pass 필터링 + borderline 자동 재분류 → 귀책분석 docx 자동 생성 | scan_no 추적 체인, validate 이중 검증, 14개 reference 패턴 |
+| 24 돌관공사비 | 소스 Excel → 노무비 출력일보 자동 생성 (통합 + 연도별 분할) | openpyxl 셀 스냅샷·붙여넣기, 공휴일 색상, 페이지 분할 |
 
 ### 공통 설계 패턴
 
@@ -660,6 +690,7 @@ python land_price_lookup.py # 공시지가 조회
 | 배포 | PyInstaller |
 | 진행 표시 | tqdm |
 | 외부 API | 카카오 로컬, 국토부 실거래가, 행안부 도로명주소, 기상청 ASOS |
+| 공휴일 | holidays (한국 공휴일·대체공휴일·선거일 자동 처리) |
 
 ---
 
