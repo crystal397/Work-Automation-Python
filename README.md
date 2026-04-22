@@ -188,10 +188,12 @@ python work/
 │
 └── 24_crash_construction/
     ├── README.md
-    ├── mandays_report_automation_v6.py   ← 가변 섹션·요일 색상
-    ├── mandays_report_automation_v7.py   ← 페이지 분할·AB/AC 단가
-    ├── mandays_report_automation_v8.py   ← 최신: 공휴일 자동·연도별 분할
-    ├── sample_260415_케이씨산업 돌관공사비 산출근거.xlsx
+    ├── .env.example                          ← 경로 설정 템플릿
+    ├── mandays_report_automation_v6.py
+    ├── mandays_report_automation_v7.py
+    ├── mandays_report_automation_v8.py
+    ├── mandays_report_automation_v9.py
+    ├── mandays_report_automation_v11.py  ← 최신: PDF 인쇄 설정 완전 복원
     └── source/                           ← 소스 파일 (연/월 파일명)
 ```
 
@@ -577,19 +579,20 @@ python main.py rescan-all
 소스 Excel 파일(업체별 공수 내역)을 읽어 돌관공사비 산출근거의 **노무비 출력일보** 시트를 자동 생성.
 
 - 카테고리 4종 분류: 본선 / 복합 / 삼성 / 기타 (소스 F·H열 키워드 기반)
-- 페이지 분할: 한 페이지 최대 21명, 초과 시 헤더 재출력하며 자동 분할
-- 합계행 E열에 실제 근로자 수 `N명` 기입, 수식 범위는 전체 페이지 통합
+- 페이지 분할: 한 페이지 최대 20명 + 합계행 (PDF 한 페이지 기준, v10~)
+- 합계행 E열에 실제 근로자 수 `N명` 기입, AC열 총액은 카테고리별 투입일 기준 분리 합산 (v9~)
 - 날짜 헤더 색상: 토=파란 글씨 / 일·공휴일=빨간 글씨 + `휴` 표시
 - `holidays` 라이브러리로 대체·선거·임시공휴일까지 자동 처리
 - 통합 파일 1개 + 연도별 분할 파일 (`_YYYY.xlsx`) 동시 저장
-- External link + definedNames 제거로 Excel 열기 속도 및 복구 경고 방지
+- PDF 인쇄 설정 자동 적용 (A4 가로·배율 79%·여백·48행 단위 페이지 나눔, v11~)
+- 경로 설정은 `.env`로 분리 관리 (민감 정보 코드 제외)
 
 ```bash
-pip install openpyxl holidays
-python mandays_report_automation_v8.py
+pip install openpyxl holidays python-dotenv
+python mandays_report_automation_v11.py
 ```
 
-**의존성**: openpyxl, holidays
+**의존성**: openpyxl, holidays, python-dotenv
 
 ---
 
