@@ -186,15 +186,19 @@ python work/
 │   └── dist/
 │       └── 엑셀_여백_조정.exe    ← 배포용 단일 EXE
 │
-└── 24_crash_construction/
+├── 24_crash_construction/
+│   ├── README.md
+│   ├── .env.example                          ← 경로 설정 템플릿
+│   ├── mandays_report_automation_v6.py
+│   ├── mandays_report_automation_v7.py
+│   ├── mandays_report_automation_v8.py
+│   ├── mandays_report_automation_v9.py
+│   ├── mandays_report_automation_v11.py  ← 최신: PDF 인쇄 설정 완전 복원
+│   └── source/                           ← 소스 파일 (연/월 파일명)
+│
+└── 27_pic_excel/
     ├── README.md
-    ├── .env.example                          ← 경로 설정 템플릿
-    ├── mandays_report_automation_v6.py
-    ├── mandays_report_automation_v7.py
-    ├── mandays_report_automation_v8.py
-    ├── mandays_report_automation_v9.py
-    ├── mandays_report_automation_v11.py  ← 최신: PDF 인쇄 설정 완전 복원
-    └── source/                           ← 소스 파일 (연/월 파일명)
+    └── insert_photos.py                  ← 사진대지 엑셀 자동 삽입
 ```
 
 ---
@@ -637,6 +641,26 @@ python main.py   # GUI 실행
 
 ---
 
+### 27. 사진대지 엑셀 자동 삽입
+
+사진 폴더의 이미지를 엑셀 사진대지 템플릿의 병합 셀 슬롯에 자동으로 삽입하는 CLI 도구.
+
+- 엑셀 시트에서 큰 병합 셀 영역을 사진 슬롯으로 자동 탐지
+- 파일명 오름차순으로 정렬 후 슬롯에 순서대로 삽입
+- 비율 유지 + 슬롯 중앙 정렬, 경계 이탈 없음
+- 스마트폰 EXIF 회전 정보 자동 반영
+- 출력 파일은 원본과 별도 저장 (`원본명_완성.xlsx`)
+
+```bash
+pip install openpyxl pillow
+python insert_photos.py 사진대지.xlsx ./photos/
+python insert_photos.py 사진대지.xlsx ./photos/ 결과물.xlsx
+```
+
+**의존성**: openpyxl, pillow
+
+---
+
 ### 21. 건설·부동산 관련 웹 크롤링 도구
 
 건설협회·감정평가 관련 사이트 크롤링 및 공시지가 조회 도구 모음.
@@ -666,6 +690,7 @@ python land_price_lookup.py # 공시지가 조회
 | 18 보고서 | PDF·HWP·Excel 등 멀티포맷 → Word 보고서 | 폴백 체인, Claude Code 연동 |
 | 20 귀책분석 | 공문 3-Pass 필터링 + borderline 자동 재분류 → 귀책분석 docx 자동 생성 | scan_no 추적 체인, validate 이중 검증, 14개 reference 패턴 |
 | 24 돌관공사비 | 소스 Excel → 노무비 출력일보 자동 생성 (통합 + 연도별 분할) | openpyxl 셀 스냅샷·붙여넣기, 공휴일 색상, 페이지 분할 |
+| 27 사진대지 | 사진 폴더 → 엑셀 병합 셀 슬롯 자동 삽입 | openpyxl TwoCellAnchor, Pillow EXIF 보정 |
 
 ### 공통 설계 패턴
 
