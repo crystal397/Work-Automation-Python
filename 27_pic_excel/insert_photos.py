@@ -145,13 +145,18 @@ def pixel_offset_to_cell(ws, start_col, start_row, offset_px_x, offset_px_y):
 
 
 def prepare_image(img_path, slot_w_px, slot_h_px):
-    """이미지를 슬롯 크기에 맞게 비율 유지 리사이즈 + JPEG 압축"""
+    """
+    이미지를 슬롯 크기에 맞게 비율 유지 리사이즈한 뒤,
+    슬롯과 정확히 같은 크기의 흰 배경 캔버스 중앙에 붙여서 반환.
+    이렇게 하면 엑셀이 어떻게 앵커를 해석하든 사진이 항상 중앙에 위치함.
+    """
     pil_img = PILImage.open(img_path)
     pil_img = ImageOps.exif_transpose(pil_img)  # 스마트폰 회전 보정
 
     if pil_img.mode not in ('RGB', 'L'):
         pil_img = pil_img.convert('RGB')
 
+    # 비율 유지 리사이즈 (패딩 고려)
     avail_w = max(slot_w_px - SLOT_PADDING_PX * 2, 1)
     avail_h = max(slot_h_px - SLOT_PADDING_PX * 2, 1)
 
@@ -160,34 +165,35 @@ def prepare_image(img_path, slot_w_px, slot_h_px):
     new_h = max(int(pil_img.height * ratio), 1)
     pil_img = pil_img.resize((new_w, new_h), PILImage.LANCZOS)
 
+    # 슬롯 크기의 흰 캔버스를 만들고 사진을 중앙에 붙이기
+    canvas = PILImage.new('RGB', (slot_w_px, slot_h_px), (255, 255, 255))
+    paste_x = (slot_w_px - new_w) // 2
+    paste_y = (slot_h_px - new_h) // 2
+    canvas.paste(pil_img, (paste_x, paste_y))
+
     buf = io.BytesIO()
-    pil_img.save(buf, format='JPEG', quality=JPEG_QUALITY, optimize=True)
+    canvas.save(buf, format='JPEG', quality=JPEG_QUALITY, optimize=True)
     buf.seek(0)
-    return buf, new_w, new_h
+    return buf, slot_w_px, slot_h_px
 
 
 def insert_one_image(ws, slot, img_path):
-    """한 슬롯에 이미지 하나 삽입 (슬롯 경계 절대 벗어나지 않음)"""
+    """
+    한 슬롯에 이미지 삽입.
+    이미지 자체가 슬롯 크기로 만들어져 있고 사진이 그 중앙에 있으므로,
+    앵커는 슬롯 전체 범위(좌상단 셀 ~ 우하단 바로 다음 셀)에 그대로 붙이면 됨.
+    """
     slot_w, slot_h = get_slot_pixel_size(ws, slot)
     img_buf, img_w, img_h = prepare_image(img_path, slot_w, slot_h)
 
-    # 슬롯 내 중앙 정렬 오프셋
-    off_x = (slot_w - img_w) // 2
-    off_y = (slot_h - img_h) // 2
-
-    # 이미지 끝점의 셀 좌표 역산
-    end_col, end_col_off, end_row, end_row_off = pixel_offset_to_cell(
-        ws, slot.min_col, slot.min_row,
-        off_x + img_w, off_y + img_h
-    )
-
+    # 앵커: 슬롯 좌상단 셀의 시작 ~ 슬롯 우하단 셀의 끝(=다음 셀의 시작)
     from_marker = AnchorMarker(
-        col=slot.min_col - 1, colOff=pixels_to_EMU(off_x),
-        row=slot.min_row - 1, rowOff=pixels_to_EMU(off_y),
+        col=slot.min_col - 1, colOff=0,
+        row=slot.min_row - 1, rowOff=0,
     )
     to_marker = AnchorMarker(
-        col=end_col, colOff=pixels_to_EMU(end_col_off),
-        row=end_row, rowOff=pixels_to_EMU(end_row_off),
+        col=slot.max_col, colOff=0,
+        row=slot.max_row, rowOff=0,
     )
 
     xl_img = XLImage(img_buf)
