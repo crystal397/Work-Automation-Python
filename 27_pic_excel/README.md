@@ -1,10 +1,13 @@
 # 27. 사진대지 엑셀 자동 삽입
 
-사진 폴더의 이미지를 엑셀 사진대지 템플릿의 슬롯에 자동으로 삽입하는 CLI 도구.
+사진 폴더의 이미지를 엑셀 사진대지 템플릿의 슬롯에 자동으로 삽입하는 도구.
+CLI(`insert_photos.py`)와 Tkinter GUI(`gui.py`) 두 가지 방식 제공.
 
 ---
 
 ## 사용 방법
+
+### CLI
 
 ```bash
 pip install openpyxl pillow
@@ -15,6 +18,36 @@ python insert_photos.py 사진대지.xlsx ./photos/
 # 출력 파일명 지정
 python insert_photos.py 사진대지.xlsx ./photos/ 결과물.xlsx
 ```
+
+### GUI (Tkinter)
+
+```bash
+python gui.py
+```
+
+- 엑셀 파일 / 사진 폴더를 버튼으로 선택 후 **사진 삽입 실행** 클릭
+- 출력 파일은 비워두면 `원본명_완성.xlsx`로 자동 생성
+- 내부적으로 `insert_photos.insert_photos()`를 그대로 호출 (로직 중복 없음)
+- `print()` 출력은 stdout 리다이렉트로 가로채 로그창에 표시, 실제 처리는 별도 스레드에서 돌려 UI 멈춤 방지
+
+### exe 빌드 (PyInstaller)
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name="PhotoInsert" gui.py
+```
+
+→ `dist/PhotoInsert.exe` 생성. 파이썬 미설치 PC에서도 더블클릭 실행 가능.
+
+의존성 누락 에러(`ModuleNotFoundError: No module named 'PIL.ImageOps'` 등)가 뜨면:
+
+```bash
+pyinstaller --onefile --windowed --name="PhotoInsert" ^
+    --hidden-import=PIL.ImageOps --collect-all=openpyxl gui.py
+```
+
+> PowerShell에서 `--name`에 한글을 직접 넣으면 콘솔 인코딩 문제로 깨질 수 있음.
+> 영문 이름으로 빌드한 뒤 탐색기에서 파일명만 한글로 변경하는 방식을 권장.
 
 ---
 

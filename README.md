@@ -198,7 +198,8 @@ python work/
 │
 └── 27_pic_excel/
     ├── README.md
-    └── insert_photos.py                  ← 사진대지 엑셀 자동 삽입
+    ├── insert_photos.py                  ← 사진대지 엑셀 자동 삽입 (CLI)
+    └── gui.py                            ← Tkinter GUI + exe 빌드용 진입점
 ```
 
 ---
@@ -643,7 +644,8 @@ python main.py   # GUI 실행
 
 ### 27. 사진대지 엑셀 자동 삽입
 
-사진 폴더의 이미지를 엑셀 사진대지 템플릿의 병합 셀 슬롯에 자동으로 삽입하는 CLI 도구.
+사진 폴더의 이미지를 엑셀 사진대지 템플릿의 병합 셀 슬롯에 자동으로 삽입하는 도구.
+CLI와 Tkinter GUI 두 가지 사용 방식 제공, PyInstaller로 exe 배포 가능.
 
 - 엑셀 시트에서 큰 병합 셀 영역을 사진 슬롯으로 자동 탐지
 - 파일명 오름차순으로 정렬 후 슬롯에 순서대로 삽입
@@ -653,11 +655,20 @@ python main.py   # GUI 실행
 
 ```bash
 pip install openpyxl pillow
+
+# CLI
 python insert_photos.py 사진대지.xlsx ./photos/
 python insert_photos.py 사진대지.xlsx ./photos/ 결과물.xlsx
+
+# GUI
+python gui.py
+
+# exe 빌드 (파이썬 미설치 PC 배포용)
+pip install pyinstaller
+pyinstaller --onefile --windowed --name="PhotoInsert" gui.py
 ```
 
-**의존성**: openpyxl, pillow
+**의존성**: openpyxl, pillow (exe 빌드 시 추가: pyinstaller)
 
 ---
 
