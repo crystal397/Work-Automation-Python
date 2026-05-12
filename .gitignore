@@ -42,6 +42,74 @@ compare_output.txt
 # 현장 정보 (실제 현장명·위경도 포함)
 **/sites.json
 
+# ===== 의뢰인/근로자 데이터 보호 =====
+
+# 25_claim_analysis: 의뢰인 공문 fixture (실명·전화·이메일 포함)
+25_claim_analysis/backdata/**/tests/fixtures/scan_result.json
+25_claim_analysis/backdata/**/tests/fixtures/귀책분석_data.json
+**/scan_result.json
+25_claim_analysis/Phase2H_modified_v4.21.zip
+
+# 33_claim_extract: 의뢰인 공문 corpus + 첨부 이미지 캐시
+33_claim_extract(25_updates)/out/
+33_claim_extract(25_updates)/out_dangjin/
+33_claim_extract(25_updates)/out_pyeongtaek/
+33_claim_extract(25_updates)/out_ocr_4hoe/
+
+# 32_24_updates: 노임내역(.xls) + 근로자 실명/임금 매칭 로그
+32_24_updates/신한 노임 대장/
+32_24_updates/match_failures.txt
+32_24_updates/match_failures_v13.txt
+32_24_updates/output.zip
+32_24_updates/output/
+
+# 27_pic_excel: 공사현장 사진 — 인물 식별 가능(초상권)
+27_pic_excel/pictures/
+
+# 26_필기체_문서화: 현장 일지 zip + 메신저 이미지
+26_필기체_문서화(claude.ai)/
+
+# 06_classification_of_cost_item_groups: 의뢰인 비목 분류 zip
+06_classification_of_cost_item_groups/*.zip
+
+# 루트 분석/스캔 결과 (프로젝트 누락 분석·차단 폴더 통계)
+/_analysis_*.txt
+/_scan_*_log.txt
+/_blocking_stats.txt
+
+# 보편적 차단 (기존 *.xlsx 외 *.xls 추가)
+*.xls
+
+# OCR 모델 바이너리 (대용량)
+*.onnx
+
+# ===== 보수적 차단: 소스코드에 의뢰인 정보·경로·실명 하드코딩 =====
+# (코드 자체는 푸시 전 별도 익명화 작업 후 .gitignore 해제)
+25_claim_analysis/
+32_24_updates/
+28_1팀_노가다/
+24_crash_construction/mandays_report_automation_v12.py
+33_claim_extract(25_updates)/
+
+# 루트 분석/스캔 스크립트 (의뢰인 경로 하드코딩)
+/_analyze_*.py
+/_scan_*.py
+/_blocking_stats.py
+/_progress_viz.py
+
+# 35_sort_data: 일부 스크립트에 의뢰인 경로 하드코딩
+35_sort_data/
+
+# ===== tracked였으나 의뢰인 정보 노출로 추적 해제 =====
+12_manhour_aggregation/readers/common.py
+18_report_craft/ARCHITECTURE.md
+18_report_craft/report_template_guide.md
+18_report_craft/src/generator/build_templates.py
+20_report_craft_partially/main.py
+20_report_craft_partially/make_template_B.py
+24_crash_construction/README.md
+24_crash_construction/mandays_report_automation_v8.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
