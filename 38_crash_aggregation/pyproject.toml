@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crash-aggregation"
+version = "0.1.0"
+description = "돌관공사비 노무비 집계·산출 자동화 (12 + 24 통합 재정리, 36/37 audit 규약 적용)"
+requires-python = ">=3.10"
+authors = [{ name = "CT Group" }]
+dependencies = [
+    "pdfplumber>=0.11.0",
+    "openpyxl>=3.1.0",
+    "pydantic>=2.0.0",
+    "typer>=0.12.0",
+    "PyYAML>=6.0",
+    "holidays>=0.50",
+    "contract-meta>=0.1.0",
+]
+
+[project.scripts]
+crash-agg = "crash_aggregation.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]

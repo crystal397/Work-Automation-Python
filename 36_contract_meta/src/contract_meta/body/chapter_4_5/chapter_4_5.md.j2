@@ -1,0 +1,9 @@
+# 4.5. 결론
+
+본 공사의 공기연장 사유는 위에서 살펴본 바와 같이 계약상대자의 책임 없는 사유(공사계약 일반조건 제26조 제1항)로 인해 공사 계약기간이 연장되었으며{% if calculation_target %}, 산정 대상 기간 **{{ calculation_target.period_start | kdate }}부터 {{ calculation_target.period_end | kdate }}까지 총 {{ calculation_target.days }}일**에 대한 간접비를 산정하였습니다{% else %}{% endif %}.
+
+본 공사 공사계약 일반조건의 공기연장 간접비 청구 조항인 제23조 제1항과 제26조 제4항에 따라 산정한 결과는 다음과 같습니다.
+
+> 본 표는 36_contract_meta 의 계약 메타와 37_cost_aggregation 의 산정 결과(`cost_result.json`)를 결합해 자동 생성됩니다. 산정 결과 표는 별도 모듈(37) 출력 참조.
+
+*요율 (산출내역서 기준): 일관 {{ rates.general_admin_percent }}% / 이윤 {{ rates.profit_percent }}% / 산재 {{ rates.industrial_accident_insurance_percent }}% / 고용 {{ rates.employment_insurance_percent }}%*

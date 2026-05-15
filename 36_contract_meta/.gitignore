@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+
+out/
+samples/
+*.pdf
+*.xlsx
+*.docx
+!tests/fixtures/*.pdf
+!tests/fixtures/*.xlsx
+
+# 루트 .gitignore 의 cover/ (coverage 디렉토리) 가 body/cover 챕터 템플릿과 충돌
+!src/contract_meta/body/cover/

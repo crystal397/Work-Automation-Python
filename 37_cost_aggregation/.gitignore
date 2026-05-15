@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+out/
+samples/
+*.xlsx
+*.pdf
+*.docx
+!tests/fixtures/*

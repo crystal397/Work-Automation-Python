@@ -20,10 +20,10 @@ import config  # noqa: E402
 # ── DRM 워터마크 필터 ────────────────────────────────────────────────────────────
 
 _DRM_LINE_RE = re.compile(
-    r"(㈜대형건설사\s+ENC\s+CONFIDENTIAL|이\s*문서는\s*㈜A건설의\s*허락없이|"
-    r"이\s*SAE\s*㈜A건설의|이\s*BAS\s*㈜A건설의|"
-    r"이\s*ENE\s*BAROMN\s*허락없이|이\s*SAS\s*㈜A건설의|"
-    r"이\s*SME\s*㈜A건설의|CONFIDENTIAL)",
+    r"(㈜대형건설사\s+ENC\s+CONFIDENTIAL|이\s*문서는\s*㈜대형건설사 E&C의\s*허락없이|"
+    r"이\s*SAE\s*㈜대형건설사 E&C의|이\s*BAS\s*㈜대형건설사 E&C의|"
+    r"이\s*ENE\s*BAROMN\s*허락없이|이\s*SAS\s*㈜대형건설사 E&C의|"
+    r"이\s*SME\s*㈜대형건설사 E&C의|CONFIDENTIAL)",
     re.IGNORECASE,
 )
 # DRM 워터마크에 함께 찍히는 단독 타임스탬프 줄 (YYYY-MM-DD HH:MM:SS)

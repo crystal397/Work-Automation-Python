@@ -1,0 +1,1036 @@
+{
+  "$defs": {
+    "BiddingMethod": {
+      "enum": [
+        "내역입찰",
+        "총액입찰"
+      ],
+      "title": "BiddingMethod",
+      "type": "string"
+    },
+    "CalculationTarget": {
+      "description": "공기연장 간접비 산정 대상 기간 (보고서 4.1.1.2 표).\n\n사람의 판단(예: 3차수와 중복되는 4회 변경분 제외)이 반영되는 필드.\nmethod=manual 또는 computed.",
+      "properties": {
+        "period_start": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "period_end": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "days": {
+          "$ref": "#/$defs/Sourced_int_"
+        },
+        "excluded_periods": {
+          "items": {
+            "$ref": "#/$defs/ExcludedPeriod"
+          },
+          "title": "Excluded Periods",
+          "type": "array"
+        }
+      },
+      "required": [
+        "period_start",
+        "period_end",
+        "days"
+      ],
+      "title": "CalculationTarget",
+      "type": "object"
+    },
+    "ClientType": {
+      "enum": [
+        "국가",
+        "지방",
+        "민간"
+      ],
+      "title": "ClientType",
+      "type": "string"
+    },
+    "ContractForm": {
+      "enum": [
+        "장기계속",
+        "계속비",
+        "단년도"
+      ],
+      "title": "ContractForm",
+      "type": "string"
+    },
+    "ContractRevision": {
+      "description": "변경계약 1회분.",
+      "properties": {
+        "no": {
+          "description": "변경 회차 (0=최초, 1·2·...=변경)",
+          "title": "No",
+          "type": "integer"
+        },
+        "date": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "contract_no": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "제2023-1-146-202301-NN호"
+        },
+        "period_start": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "period_end": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "duration_days": {
+          "$ref": "#/$defs/Sourced_int_"
+        },
+        "duration_diff_days": {
+          "$ref": "#/$defs/Sourced_int_",
+          "description": "직전 회차 대비 증감일"
+        },
+        "amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "amount_diff_krw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_int_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "no",
+        "date",
+        "period_start",
+        "period_end",
+        "duration_days",
+        "duration_diff_days",
+        "amount"
+      ],
+      "title": "ContractRevision",
+      "type": "object"
+    },
+    "ContractTerms": {
+      "description": "변경계약서에 표기되는 표준 계약조건.",
+      "properties": {
+        "price_adjustment_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "물가변동계약금액조정방법 — 지수조정율/품목조정율"
+        },
+        "delay_penalty_rate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "지체상금율 — 예: '0.5/1000'"
+        },
+        "defect_warranty_rate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ContractTerms",
+      "type": "object"
+    },
+    "ContractTrack": {
+      "description": "총공사 계약 또는 차수별 계약 트랙.",
+      "properties": {
+        "initial": {
+          "$ref": "#/$defs/ContractRevision",
+          "description": "최초 계약 (no=0)"
+        },
+        "revisions": {
+          "description": "변경 계약 회차 배열. revisions[i].no = i+1",
+          "items": {
+            "$ref": "#/$defs/ContractRevision"
+          },
+          "title": "Revisions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "initial"
+      ],
+      "title": "ContractTrack",
+      "type": "object"
+    },
+    "Contractor": {
+      "description": "계약상대자(원도급사 또는 하도급사).",
+      "properties": {
+        "name_legal": {
+          "$ref": "#/$defs/Sourced_str_",
+          "description": "법인 정식명칭 (예: ㈜A건설)"
+        },
+        "name_display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "보고서 표기용 (예: ㈜A건설)"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representative": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "business_no": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_ratio_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_float_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name_legal"
+      ],
+      "title": "Contractor",
+      "type": "object"
+    },
+    "ExcludedPeriod": {
+      "properties": {
+        "period_start": {
+          "format": "date",
+          "title": "Period Start",
+          "type": "string"
+        },
+        "period_end": {
+          "format": "date",
+          "title": "Period End",
+          "type": "string"
+        },
+        "days": {
+          "title": "Days",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "period_start",
+        "period_end",
+        "days",
+        "reason"
+      ],
+      "title": "ExcludedPeriod",
+      "type": "object"
+    },
+    "Extraction": {
+      "properties": {
+        "extractor_version": {
+          "title": "Extractor Version",
+          "type": "string"
+        },
+        "extracted_at": {
+          "description": "ISO8601",
+          "title": "Extracted At",
+          "type": "string"
+        },
+        "input_files": {
+          "items": {
+            "$ref": "#/$defs/InputFile"
+          },
+          "title": "Input Files",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "extractor_version",
+        "extracted_at",
+        "input_files"
+      ],
+      "title": "Extraction",
+      "type": "object"
+    },
+    "InputFile": {
+      "properties": {
+        "role": {
+          "description": "문서 역할 (변경계약서_1차_4회, 산출내역서, ...)",
+          "title": "Role",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "pages": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pages"
+        },
+        "method": {
+          "enum": [
+            "pdf_text",
+            "ocr",
+            "xlsx",
+            "docx",
+            "hwp"
+          ],
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "path",
+        "sha256",
+        "method"
+      ],
+      "title": "InputFile",
+      "type": "object"
+    },
+    "Money": {
+      "description": "금액 (한글+숫자 동시 보관 → consistency.py 가 자동 검증).",
+      "properties": {
+        "krw": {
+          "$ref": "#/$defs/Sourced_int_"
+        },
+        "korean": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "krw"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "Owner": {
+      "description": "발주자.",
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Sourced_str_"
+        },
+        "address": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "representative": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "contract_officer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "계약담당공무원/분임계약담당"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Owner",
+      "type": "object"
+    },
+    "Project": {
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Sourced_str_"
+        },
+        "name_short": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "client_type": {
+          "$ref": "#/$defs/Sourced_ClientType_"
+        },
+        "contract_form": {
+          "$ref": "#/$defs/Sourced_ContractForm_"
+        },
+        "bidding_method": {
+          "$ref": "#/$defs/Sourced_BiddingMethod_"
+        },
+        "vat_type": {
+          "$ref": "#/$defs/Sourced_VATType_"
+        }
+      },
+      "required": [
+        "name",
+        "client_type",
+        "contract_form",
+        "bidding_method",
+        "vat_type"
+      ],
+      "title": "Project",
+      "type": "object"
+    },
+    "Rates": {
+      "description": "산출내역서에서 추출한 요율.",
+      "properties": {
+        "general_admin_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_float_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "profit_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_float_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "industrial_accident_insurance_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_float_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "employment_insurance_percent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_float_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Rates",
+      "type": "object"
+    },
+    "Scope": {
+      "description": "공사의 주요 내용.",
+      "properties": {
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "length_km": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_float_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/Sourced_str_"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "title": "Scope",
+      "type": "object"
+    },
+    "Source": {
+      "description": "단일 데이터 추출 출처.",
+      "properties": {
+        "file": {
+          "description": "원본 파일 경로(프로젝트 입력 디렉터리 기준 상대경로)",
+          "title": "File",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PDF 페이지 번호(1-base). 엑셀이면 None",
+          "title": "Page"
+        },
+        "sheet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "엑셀 시트명",
+          "title": "Sheet"
+        },
+        "cell": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "엑셀 셀 주소 (예: G42)",
+          "title": "Cell"
+        },
+        "field_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "원본 표/문서의 필드명(예: '공사명')",
+          "title": "Field Label"
+        },
+        "raw_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "원본에서 추출한 원문 그대로",
+          "title": "Raw Text"
+        },
+        "method": {
+          "description": "pdf_text=PDF 텍스트 레이어, ocr=OCR, llm=LLM 보조, manual=사용자 직접, computed=다른 필드에서 산출, cross_check=의뢰처 요약본 등 보조 자료",
+          "enum": [
+            "pdf_text",
+            "ocr",
+            "llm",
+            "manual",
+            "computed",
+            "cross_check"
+          ],
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "method"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Sourced_BiddingMethod_": {
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/BiddingMethod"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[BiddingMethod]",
+      "type": "object"
+    },
+    "Sourced_ClientType_": {
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/ClientType"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[ClientType]",
+      "type": "object"
+    },
+    "Sourced_ContractForm_": {
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/ContractForm"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[ContractForm]",
+      "type": "object"
+    },
+    "Sourced_VATType_": {
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/VATType"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[VATType]",
+      "type": "object"
+    },
+    "Sourced_date_": {
+      "properties": {
+        "value": {
+          "format": "date",
+          "title": "Value",
+          "type": "string"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[date]",
+      "type": "object"
+    },
+    "Sourced_float_": {
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[float]",
+      "type": "object"
+    },
+    "Sourced_int_": {
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "integer"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[int]",
+      "type": "object"
+    },
+    "Sourced_str_": {
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "_source": {
+          "$ref": "#/$defs/Source"
+        }
+      },
+      "required": [
+        "value",
+        "_source"
+      ],
+      "title": "Sourced[str]",
+      "type": "object"
+    },
+    "SubsequentContract": {
+      "description": "2차수·3차수 등 후속 차수 (참고용 메타).",
+      "properties": {
+        "year_no": {
+          "title": "Year No",
+          "type": "integer"
+        },
+        "initial_date": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "period_start": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "period_end": {
+          "$ref": "#/$defs/Sourced_date_"
+        },
+        "amount_krw": {
+          "$ref": "#/$defs/Sourced_int_"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "year_no",
+        "initial_date",
+        "period_start",
+        "period_end",
+        "amount_krw"
+      ],
+      "title": "SubsequentContract",
+      "type": "object"
+    },
+    "Supervisor": {
+      "description": "건설사업관리단(감리단).",
+      "properties": {
+        "raw_text": {
+          "$ref": "#/$defs/Sourced_str_"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/SupervisorMember"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "responsible_person": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sourced_str_"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "책임건설사업관리기술인 (감독자)"
+        }
+      },
+      "required": [
+        "raw_text"
+      ],
+      "title": "Supervisor",
+      "type": "object"
+    },
+    "SupervisorMember": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "share_percent": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Share Percent"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SupervisorMember",
+      "type": "object"
+    },
+    "VATType": {
+      "enum": [
+        "영세율",
+        "일반과세"
+      ],
+      "title": "VATType",
+      "type": "string"
+    }
+  },
+  "description": "공기연장 보고서가 참조하는 단일 메타 객체.",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0",
+      "default": "0.1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "project": {
+      "$ref": "#/$defs/Project"
+    },
+    "owner": {
+      "$ref": "#/$defs/Owner"
+    },
+    "contractor": {
+      "$ref": "#/$defs/Contractor"
+    },
+    "supervisor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Supervisor"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Scope"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "contract_terms": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContractTerms"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "total_contract": {
+      "$ref": "#/$defs/ContractTrack"
+    },
+    "first_year_contract": {
+      "$ref": "#/$defs/ContractTrack"
+    },
+    "subsequent_contracts": {
+      "items": {
+        "$ref": "#/$defs/SubsequentContract"
+      },
+      "title": "Subsequent Contracts",
+      "type": "array"
+    },
+    "subcontractors": {
+      "items": {
+        "$ref": "#/$defs/Contractor"
+      },
+      "title": "Subcontractors",
+      "type": "array"
+    },
+    "rates": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Rates"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "calculation_target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CalculationTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "extraction": {
+      "$ref": "#/$defs/Extraction"
+    }
+  },
+  "required": [
+    "project",
+    "owner",
+    "contractor",
+    "total_contract",
+    "first_year_contract",
+    "extraction"
+  ],
+  "title": "ContractMeta",
+  "type": "object"
+}

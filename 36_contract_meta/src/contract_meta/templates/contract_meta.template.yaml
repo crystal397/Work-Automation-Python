@@ -1,0 +1,252 @@
+# ────────────────────────────────────────────────────────────────
+# 계약 메타데이터 입력 양식 (contract_meta v0.1.0)
+#
+# 사용법
+#   1) 각 leaf 필드는 다음 구조로 채운다:
+#        필드명:
+#          value: <값>
+#          _source:
+#            file: <원본 파일명>
+#            page: <PDF 페이지 1-base, 엑셀이면 생략>
+#            sheet: <엑셀 시트명, 엑셀일 때만>
+#            cell:  <엑셀 셀 주소, 엑셀일 때만>
+#            field_label: <원본 문서의 라벨>
+#            raw_text: <원본에서 그대로 옮긴 값 — 검증용>
+#            method: manual | pdf_text | ocr | computed | cross_check
+#
+#   2) 사람이 직접 입력하는 경우 method: manual
+#      자동 추출은 method: pdf_text (텍스트 PDF) / ocr (이미지 PDF)
+#      한글금액 → 숫자 등 다른 필드에서 산출 시 method: computed
+#
+#   3) `contract-meta build contract_meta.yaml` 실행 시
+#      - ContractMeta JSON 출력
+#      - 한글금액↔숫자 일치, 변경계약 누계, 날짜 산술 자동 검증
+#      - extraction_report.md 에 검증 결과 정리
+# ────────────────────────────────────────────────────────────────
+schema_version: "0.1.0"
+
+# ─────── 사업 (project) ───────
+project:
+  name:
+    value: ""
+    _source: { file: "", page: 1, field_label: "공사명", raw_text: "", method: "manual" }
+  name_short:
+    value: ""
+    _source: { file: "", method: "manual" }
+  client_type:
+    value: "국가"   # 국가 | 지방 | 민간
+    _source: { file: "", method: "manual" }
+  contract_form:
+    value: "장기계속"   # 장기계속 | 계속비 | 단년도
+    _source: { file: "", method: "manual" }
+  bidding_method:
+    value: "내역입찰"   # 내역입찰 | 총액입찰
+    _source: { file: "", method: "manual" }
+  vat_type:
+    value: "영세율"   # 영세율 | 일반과세
+    _source: { file: "", method: "manual" }
+  bid_announcement_date:
+    # 입찰공고일 — 보고서 5.4 적용 법령 검색의 기준일.
+    # `contract-meta laws-import` 가 이 날짜로 22_laws_import 호출.
+    # 없으면 5.4 자동 생성 불가 → 사람이 직접 채우거나 CLI 인자로 전달.
+    value: null
+    _source: { file: "", page: 1, field_label: "공고일", raw_text: "", method: "manual" }
+
+# ─────── 발주자 ───────
+owner:
+  name:
+    value: ""
+    _source: { file: "", page: 1, field_label: "발주자", raw_text: "", method: "manual" }
+  contract_officer:
+    value: ""
+    _source: { file: "", page: 1, field_label: "계약담당", raw_text: "", method: "manual" }
+
+# ─────── 계약상대자 (원도급사) ───────
+contractor:
+  name_legal:
+    value: ""
+    _source: { file: "", page: 1, field_label: "상호또는법인", raw_text: "", method: "manual" }
+  name_display:
+    value: ""
+    _source: { file: "", method: "manual" }
+  address:
+    value: ""
+    _source: { file: "", page: 1, field_label: "주소", raw_text: "", method: "manual" }
+  representative:
+    value: ""
+    _source: { file: "", page: 1, field_label: "대표자", raw_text: "", method: "manual" }
+  business_no:
+    value: ""
+    _source: { file: "", page: 1, field_label: "사업자등록번호", raw_text: "", method: "manual" }
+  share_ratio_percent:
+    value: 100
+    _source: { file: "", page: 1, field_label: "지분율", raw_text: "", method: "manual" }
+
+# ─────── 건설사업관리단 (감리단) ───────
+supervisor:
+  raw_text:
+    value: ""
+    _source: { file: "", page: 1, field_label: "건설사업관리단", raw_text: "", method: "manual" }
+  members: []   # [{ name: "동부엔지니어링(주)", share_percent: 60 }, ...]
+  responsible_person:
+    value: ""
+    _source: { file: "", page: 1, field_label: "감독자/책임건설사업관리기술인", raw_text: "", method: "manual" }
+
+# ─────── 공사의 주요내용 ───────
+scope:
+  location:
+    value: ""
+    _source: { file: "", method: "manual" }
+  stations:
+    value: ""
+    _source: { file: "", method: "manual" }
+  length_km:
+    value: 0.0
+    _source: { file: "", method: "manual" }
+  items: []   # [{ value: "본선터널(NATM) 1.836km", _source: {...} }, ...]
+
+# ─────── 계약조건 ───────
+contract_terms:
+  price_adjustment_method:
+    value: ""   # "지수조정율" | "품목조정율"
+    _source: { file: "", page: 1, field_label: "물가변동계약금액조정방법", raw_text: "", method: "manual" }
+  delay_penalty_rate:
+    value: ""   # "0.5/1000"
+    _source: { file: "", page: 1, field_label: "지체상금율", raw_text: "", method: "manual" }
+
+# ─────── 총공사 계약 (1.3.1.1) ───────
+total_contract:
+  initial:
+    seq: 0
+    date:
+      value: 2023-12-22
+      _source: { file: "", page: 1, field_label: "계약체결일", raw_text: "", method: "manual" }
+    contract_no:
+      value: ""
+      _source: { file: "", method: "manual" }
+    period_start:
+      value: 2023-12-22
+      _source: { file: "", method: "manual" }
+    period_end:
+      value: 2028-11-24
+      _source: { file: "", method: "manual" }
+    duration_days:
+      value: 1800
+      _source: { file: "", method: "computed" }
+    duration_diff_days:
+      value: 0
+      _source: { file: "", method: "computed" }
+    amount:
+      krw:
+        value: 0
+        _source: { file: "", page: 1, field_label: "총공사 계약금액", raw_text: "", method: "manual" }
+      korean:
+        value: ""
+        _source: { file: "", page: 1, field_label: "총공사 계약금액(한글)", raw_text: "", method: "manual" }
+  revisions: []   # ContractRevision 항목 배열
+
+# ─────── 1차수 계약 (1.3.1.2, 1.3.2, 4.1.1.2 — 분석 대상) ───────
+first_year_contract:
+  initial:
+    seq: 0
+    date:
+      value: 2023-12-22
+      _source: { file: "", page: 1, field_label: "계약체결일", raw_text: "", method: "manual" }
+    contract_no:
+      value: ""
+      _source: { file: "", method: "manual" }
+    period_start:
+      value: 2023-12-22
+      _source: { file: "", method: "manual" }
+    period_end:
+      value: 2024-11-29
+      _source: { file: "", method: "manual" }
+    duration_days:
+      value: 344
+      _source: { file: "", method: "computed" }
+    duration_diff_days:
+      value: 0
+      _source: { file: "", method: "computed" }
+    amount:
+      krw:
+        value: 0
+        _source: { file: "", method: "manual" }
+      korean:
+        value: ""
+        _source: { file: "", method: "manual" }
+  # revisions: 1차1회, 1차2회, ... 추가
+  revisions:
+    - seq: 1
+      date:
+        value: 2024-12-02
+        _source: { file: "", page: 1, field_label: "변경계약일", raw_text: "", method: "manual" }
+      contract_no:
+        value: "제2023-1-146-202301-01호"
+        _source: { file: "", page: 1, field_label: "계약번호", raw_text: "", method: "manual" }
+      period_start:
+        value: 2023-12-22
+        _source: { file: "", method: "manual" }
+      period_end:
+        value: 2025-11-30
+        _source: { file: "", page: 1, field_label: "변경후 준공기한", raw_text: "", method: "manual" }
+      duration_days:
+        value: 710
+        _source: { file: "", method: "computed" }
+      duration_diff_days:
+        value: 366
+        _source: { file: "", method: "computed" }
+      amount:
+        krw:
+          value: 25000000000
+          _source: { file: "", method: "manual" }
+        korean:
+          value: "금이백오십억원"
+          _source: { file: "", method: "manual" }
+      amount_diff_krw:
+        value: 0
+        _source: { file: "", method: "computed" }
+      reason:
+        value: "인허가 및 지장물 이설 소요기간 필요에 따라 준공기한 연장 필요"
+        _source: { file: "", page: 1, field_label: "변경 사유", raw_text: "", method: "manual" }
+
+# ─────── 산출내역서 요율 (자동 추출 가능) ───────
+rates:
+  general_admin_percent:
+    value: 4.50
+    _source: { file: "", sheet: "", cell: "", method: "pdf_text" }
+  profit_percent:
+    value: 5.18
+    _source: { file: "", sheet: "", cell: "", method: "pdf_text" }
+  industrial_accident_insurance_percent:
+    value: 3.70
+    _source: { file: "", method: "pdf_text" }
+  employment_insurance_percent:
+    value: 1.57
+    _source: { file: "", method: "pdf_text" }
+
+# ─────── 공기연장 간접비 산정 대상 기간 (사람 판단 입력) ───────
+calculation_target:
+  period_start:
+    value: 2024-11-30
+    _source: { file: "", method: "manual" }
+  period_end:
+    value: 2026-03-31
+    _source: { file: "", method: "manual" }
+  days:
+    value: 487
+    _source: { file: "", method: "computed" }
+  excluded_periods:
+    - period_start: 2026-04-01
+      period_end: 2026-08-31
+      days: 153
+      reason: "4회 변경 연장분은 3차수 공사기간과 중복되어 산정 제외"
+
+# ─────── 하도급사 ───────
+subcontractors: []
+
+# ─────── 추출 메타 ───────
+extraction:
+  extractor_version: "0.1.0"
+  extracted_at: ""   # build 시 자동 채움
+  input_files: []
+  warnings: []

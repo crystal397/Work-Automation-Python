@@ -196,10 +196,45 @@ python work/
 │   ├── mandays_report_automation_v11.py  ← 최신: PDF 인쇄 설정 완전 복원
 │   └── source/                           ← 소스 파일 (연/월 파일명)
 │
-└── 27_pic_excel/
+├── 27_pic_excel/
+│   ├── README.md
+│   ├── insert_photos.py                  ← 사진대지 엑셀 자동 삽입 (CLI)
+│   └── gui.py                            ← Tkinter GUI + exe 빌드용 진입점
+│
+├── 33_claim_extract(25_updates)/         ← 귀책분석 신 파이프라인 (25의 발전형)
+│   ├── README.md
+│   ├── pyproject.toml                    ← pip install -e . → claim-index/claim-report
+│   ├── indexer.py                        ← vendor_dir → out/index.jsonl + corpus.md
+│   ├── report_adapter.py                 ← 귀책분석_data.json → docx (어조·표 자동 검증)
+│   ├── ocr.py
+│   └── claim_analysis/                   ← Phase2H 모듈
+│
+├── 36_contract_meta/                     ← 계약 메타 단일 진실원 (보고서 1·2·3.2·4·결론 참조)
+│   ├── README.md
+│   ├── pyproject.toml                    ← contract-meta CLI 8종
+│   ├── schemas/contract_meta.schema.json
+│   └── src/contract_meta/
+│       ├── models.py                     ← Sourced[T] 출처 의무 (pydantic v2)
+│       ├── cli.py                        ← init/build/extract-rates/render/scan-attach/attach/link-claim/schema
+│       ├── body/                         ← Jinja2 챕터 템플릿 + KICM docx 렌더러
+│       ├── extractors/                   ← pdf_text·excerpts·report_rates·estimate_sheet
+│       └── validators/consistency.py     ← 금액·기간·누계 + 한글금액 파서
+│
+├── 37_cost_aggregation/                  ← 공기연장 간접비 4.3/4.4/4.5 자동 산정
+│   ├── README.md
+│   ├── pyproject.toml                    ← cost-agg CLI 3종
+│   └── src/cost_aggregation/
+│       ├── calc.py                       ← 보험료·일관·이윤·총원가 산식
+│       ├── builder.py                    ← cost_input.yaml + contract_meta.json → CostResult
+│       └── extractors/                   ← personnel/salary_xlsx/payroll_pdf/명세서_pdf/보고서_표
+│
+└── 38_crash_aggregation/                 ← 돌관공사비 집계 (12+24 통합)
     ├── README.md
-    ├── insert_photos.py                  ← 사진대지 엑셀 자동 삽입 (CLI)
-    └── gui.py                            ← Tkinter GUI + exe 빌드용 진입점
+    ├── pyproject.toml                    ← crash-agg CLI 3종 + daily-report
+    └── src/crash_aggregation/
+        ├── models.py                     ← WorkerDay/WorkerMonth/MonthlyCrash/CrashResult
+        ├── extractors/crew_xlsx.py       ← 24 v12 패턴 (시트 NN.공종명, B열 작업자)
+        └── builders/monthly_matrix.py    ← 월별 매트릭스 xlsx (작업자×일자)
 ```
 
 ---
@@ -690,6 +725,110 @@ python land_price_lookup.py # 공시지가 조회
 
 ---
 
+### 33. 귀책분석 자동화 파이프라인 (claim_extract)
+
+20의 발전형. 공기연장 보고서의 **제3장 귀책분석** + **제5장 5.3 수발신문서** 까지 한 번에 자동 생성. `pip install -e .` 후 어디서든 콘솔 명령 호출.
+
+- **pyproject.toml 패키지화**: `claim-index`, `claim-report` 콘솔 스크립트 글로벌 등록
+- **글로벌 슬래시 명령**: `~/.claude/commands/analyze-claim.md` + `~/.claude/agents/claim-extractor.md` — 어떤 작업 디렉토리에서도 `/analyze-claim` 호출 가능
+- **어조 자동 변환** (`--auto-fix-tone`): 평서체(`~한다`) → 격식체(`~합니다`) 자동, 인용문(「」, "") 보호
+- **5종 자동 검증**: 본문 어조·금지어, items[] 표 완전성, sender 분류기, 합계 hard-fail, 시간순 정렬
+- **첨부 자동 삽입**: index.jsonl → scan_result.json 어댑터로 본문 인라인 공문 발췌 박스 + 제5장 5.3 부록 이미지 자동
+- **분류기 47 케이스 회귀 테스트**: 8개 프로젝트 양식 통과 (각 양식 (A·B·C·D·E·F공구 등) 등)
+- **36 contract_meta 와 머지**: bridge 의 `to_claim_analysis_context()` 가 메타 컨텍스트를 data.json 에 자동 머지
+
+```bash
+# 1) 인덱싱
+claim-index "<vendor_dir>" --output ./out
+
+# 2) /analyze-claim 으로 corpus 분석 → 사건 식별 → claim-extractor 위임 → data.json
+
+# 3) docx 생성 (어조 자동 변환 + 첨부 자동 삽입)
+claim-report out/귀책분석_data.json --auto-fix-tone
+```
+
+**의존성**: pydantic v2, PyMuPDF, rapidocr-onnxruntime, python-docx, typer
+
+---
+
+### 36. 계약 메타데이터 단일 진실원 (contract_meta)
+
+공기연장 보고서의 **표지·1장·2장·3.2장·4장·결론** 에서 인용되는 계약·요율·일수 메타데이터를 단일 JSON 으로 관리. 모든 leaf 필드에 `_source(file, page, sheet, cell, method)` 출처 의무.
+
+- **Sourced[T] 출처 의무**: pydantic v2 validator 가 _source 누락 시 에러
+- **자동 정합성 검증**: 한글금액↔숫자, 변경계약 누계, 날짜 산술, 산정 대상 기간
+- **시각적 출처**: build 시 모든 (file, page) 페어를 PyMuPDF 로 PNG 자동 캡쳐
+- **요율 4종 이중 추출**: 산정결과표 비고 + 본문 단락 양쪽에서 추출 → 일치 확인
+- **findings.md 자동**: 검증 실패·경고를 의뢰처 회신용 1차 검토서 초안으로
+- **본문 템플릿(Jinja2)**: cover, chapter_1, chapter_2, chapter_3_2, chapter_4_2, chapter_4_5
+- **KICM 양식 docx**: 맑은고딕, 페이지 머리말·번호, 인용박스, 표 스타일
+- **5장 첨부 합철**: 수신자료 폴더 휴리스틱 분류 → appendix.yaml → PyMuPDF 합본 PDF + appendix_toc.md
+
+```bash
+contract-meta init "<프로젝트명>"
+contract-meta build out/<프로젝트>/contract_meta.yaml
+contract-meta extract-rates <보고서.pdf|산출내역서.xlsx>
+contract-meta render out/<프로젝트>/contract_meta.json \
+  --chapters cover,chapter_2,chapter_3_2 --docx body.docx
+contract-meta scan-attach <수신자료_루트> --out appendix.yaml
+contract-meta attach appendix.yaml          # → 5_appendix.pdf + appendix_toc.md
+contract-meta link-claim <meta.json> <claim.json>
+contract-meta schema
+```
+
+**C공구(철도) 시연**: 통과 19/실패 1/경고 0, 18 PNG 자동 캡쳐, 한글↔숫자 60,000원 불일치 자동 검출.
+
+**의존성**: pydantic v2, PyMuPDF, openpyxl, Jinja2, python-docx, typer, PyYAML
+
+---
+
+### 37. 공기연장 간접비 산정 (cost_aggregation)
+
+보고서 **4.3(원도급)·4.4(하도급)·4.5(결론)** 의 표·집계·요율 계산을 자동화. 36 의 rates·calculation_target 을 직접 참조해 요율 4종(일관·이윤·산재·고용) 일치 검증.
+
+- **산식 자동**: 산재·고용보험료, 일관·이윤(`소계×4.5%`, `(소계+일관)×5.18%`), 총원가·천원단위 절사
+- **하도급 산재 0% 분기**: 보고서 p.74 규칙 자동 적용 (`company_role == "sub"` 분기)
+- **어댑터 5종**: 인원투입현황 xlsx(33명 자동), 월별급여현황표 xlsx(일할 산정), 지불조서 PDF(14개월 부서 합계), 인원별 명세서 PDF(현채직 7명), 보고서 본문 4.3.2.2 표 cross_check
+- **일할 산정**: 산정기간 월 중간 시작 시 그 월 지급액 × (포함일수/그 월 일수)
+- **contract_meta.audit 재사용**: 모든 셀에 `_source` 부착
+
+```bash
+cost-agg build <cost_input.yaml> --meta <contract_meta.json>
+cost-agg personnel <인원투입현황.xlsx> --affiliation --start --end
+cost-agg schema
+```
+
+**C공구(철도) 시연**: v0.1 manual 총액 **5,769,697,000원 = 보고서 100% 일치**, 하도급 ㈜D 21명 99.96%, 일할 산정 검증 완료.
+
+**의존성**: pydantic v2, openpyxl, PyMuPDF, contract_meta(36)
+
+---
+
+### 38. 돌관공사비 집계 (crash_aggregation)
+
+12_manhour_aggregation 의 회사별 일용노무비 + 24_crash_construction 의 월별 공종별 작업자를 통합. 공기연장 간접비(37)와는 **별도 트랙**으로 일용노무비·공수 산정 담당.
+
+- **24 v12 패턴 본격 구현**: 시트 `NN.공종명`, B열 작업자명 블록, hdr_idx 부터 F·H 카테고리 분류
+- **28개월 일괄**: 파일명 YY.MM 매칭으로 폴더 단위 처리
+- **월별 매트릭스 xlsx**: 공종별 시트(작업자×일자 1~31일 매트릭스 + 단가·공수·노무비) + 요약 시트
+- **contract_meta.audit 규약 공유**: Sourced[T] 출처 의무 유지
+- **카테고리 합계**: 월별·공종별·카테고리별 마크다운 리포트
+
+```bash
+crash-agg extract <xlsx> --year YYYY --month MM
+crash-agg build <source_dir> --project <name>       # 일괄 처리
+crash-agg daily-report <xlsx> --year YYYY --month MM --out <out.xlsx>
+crash-agg schema
+```
+
+**㈜C산업 시연**: 28개월 xlsx 전체, **1,993명(중복 제외) / 공수 155,258일 / 노무비 354억 1,425만원**. 24.06 매트릭스 104명 8공종 25KB.
+
+**미구현**: 24의 정교한 출력일보(인쇄영역·머지셀·48행·휴일), 12 회사별 어댑터 4개(㈜C산업 외), 산출내역서 노임 시트 자동 기입.
+
+**의존성**: pydantic v2, openpyxl, holidays(공휴일), contract_meta(36)
+
+---
+
 ## 주요 기능 요약
 
 | 모듈 | 처리 규모 | 핵심 기술 |
@@ -702,6 +841,10 @@ python land_price_lookup.py # 공시지가 조회
 | 20 귀책분석 | 공문 3-Pass 필터링 + borderline 자동 재분류 → 귀책분석 docx 자동 생성 | scan_no 추적 체인, validate 이중 검증, 14개 reference 패턴 |
 | 24 돌관공사비 | 소스 Excel → 노무비 출력일보 자동 생성 (통합 + 연도별 분할) | openpyxl 셀 스냅샷·붙여넣기, 공휴일 색상, 페이지 분할 |
 | 27 사진대지 | 사진 폴더 → 엑셀 병합 셀 슬롯 자동 삽입 | openpyxl TwoCellAnchor, Pillow EXIF 보정 |
+| 33 귀책분석 신 파이프라인 | 47 케이스 회귀 + 8개 양식 통과, 5종 자동 검증, 어조 자동 변환 | pydantic v2, /analyze-claim 글로벌 슬래시, bridge 머지 |
+| 36 계약 메타 | C공구(철도) 통과 19/실패 1, 한글↔숫자 60,000원 자동 검출 | Sourced[T] 출처 의무, KICM docx, 5장 합철 |
+| 37 간접비 산정 | C공구(철도) 총액 5,769,697,000원 보고서 100% 일치 | 산식 자동, 하도급 산재 0% 분기, 일할 산정 |
+| 38 돌관공사비 신 | ㈜C산업 1,993명·155,258공수·354억원, 24의 발전형 | 24 v12 패턴, 매트릭스 xlsx, 28개월 일괄 |
 
 ### 공통 설계 패턴
 

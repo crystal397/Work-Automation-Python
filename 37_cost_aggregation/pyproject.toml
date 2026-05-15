@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cost-aggregation"
+version = "0.1.0"
+description = "공기연장 간접비 산정 자동화 — 보고서 4.3 / 4.4 / 4.5 (간접노무비·경비·일관·이윤·집계표) 생성"
+requires-python = ">=3.10"
+authors = [{ name = "CT Group" }]
+dependencies = [
+    "pdfplumber>=0.11.0",
+    "PyMuPDF>=1.24.0",
+    "openpyxl>=3.1.0",
+    "pydantic>=2.0.0",
+    "typer>=0.12.0",
+    "PyYAML>=6.0",
+    "contract-meta>=0.1.0",
+]
+
+[project.scripts]
+cost-agg = "cost_aggregation.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
