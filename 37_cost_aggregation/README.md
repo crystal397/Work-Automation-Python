@@ -28,7 +28,7 @@
 ```
 37_cost_aggregation/
 ├── pyproject.toml
-├── samples/                                 # C공구(철도) 입력 PDF·xlsx (gitignore)
+├── samples/                                 # 사건별 입력 PDF·xlsx (gitignore)
 ├── src/cost_aggregation/
 │   ├── models.py                            # 산정 결과 스키마 (pydantic v2)
 │   ├── audit.py                             # Source 빌더 (contract_meta.audit 재사용)

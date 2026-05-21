@@ -27,7 +27,7 @@ contract-meta extract <input_dir> --project "프로젝트명"
 36_contract_meta/
 ├── pyproject.toml
 ├── schemas/contract_meta.schema.json   # models.py 에서 자동 생성
-├── samples/                            # C공구(철도) PDF (gitignore)
+├── samples/                            # 사건별 PDF (gitignore)
 ├── src/contract_meta/
 │   ├── models.py                       # pydantic v2 모델 (= 단일 진실원)
 │   ├── audit.py                        # _source 메타 빌더
